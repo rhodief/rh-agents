@@ -1,0 +1,1 @@
+docker build -t rhodie/rh-agents_dev -f Dockerfile.dev .

@@ -1,0 +1,1 @@
+docker run -it --rm --name rh_agents -v ".:/app" -v "./.gemini:/rh-agents/.gemini" -p 8501:8501 -p 8766:8766 -p 8000:8000 --env-file .env rhodie/rh-agents_dev

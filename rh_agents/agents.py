@@ -144,6 +144,7 @@ class StepExecutorAgent(Agent):
         STEP_EXECUTOR_PROMPT = '''
             Você é um executor de passos.
             Execute o passo fornecido de acordo com o plano de execução e o objetivo geral.
+            Se você já tiver informações necessárias em seu contexto, não chame ferramentas desnecessariamente.
             '''
         tool_set = ToolSet(tools) if tools else ToolSet()
         async def handler(input_data: DoctrineStep, context: str, execution_state: ExecutionState) -> StepResult:

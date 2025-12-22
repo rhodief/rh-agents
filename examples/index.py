@@ -61,7 +61,8 @@ if __name__ == "__main__":
     doctrine_receiver_agent = DoctrineReceverAgent(llm=llm, tools=tools)
     step_executor_agent = StepExecutorAgent(llm=llm, tools=tools_2)
     reviewer_agent = ReviewerAgent(llm=llm, tools=[])
-    msg = 'Faça um relatório para a Análise da Admissibilidade Cotejada de modo a extrair os óbices jurídicos da decisão de Admissibilidade e verificar o respectivo rebatimento no agravo de Recurso Especial correspondente'
+    #msg = 'Faça um relatório para a Análise da Admissibilidade Cotejada de modo a extrair os óbices jurídicos da decisão de Admissibilidade e verificar o respectivo rebatimento no agravo de Recurso Especial correspondente'
+    msg = 'Faça um relatório com o resumo combinado dos óbices jurídicos da decisão de Admissibilidade e do respectivo Agravo de Recurso Especial mostrando em uma tabela correspondência ou não entre os óbices e seus rebatimentosque constam nos dois documentos. Utilize as ferramentas disponíveis para buscar as peças necessárias.'
     message = Message(content=msg, author=AuthorType.USER)
     
     # Create beautiful event printer

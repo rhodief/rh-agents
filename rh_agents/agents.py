@@ -109,6 +109,7 @@ class DoctrineReceverAgent(Agent):
                 model=MODEL,
                 max_completion_tokens=MAX_TOKENS,
                 tools=ToolSet(tools if tools else []),
+                tool_choice={"type": "function", "function": {"name": "DoctrineTool"}}
             )
             execution_result = await llm_event(llm_input, context, execution_state)
             

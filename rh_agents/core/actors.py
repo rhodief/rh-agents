@@ -97,6 +97,6 @@ class Agent(BaseActor):
     postconditions: list[Callable] = []
     event_type: EventType = EventType.AGENT_CALL
     tools: ToolSet
-    llm: LLM
+    llm: LLM | None = None
     
     

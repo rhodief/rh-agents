@@ -24,7 +24,9 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     execution_time: Union[float, None] = Field(default=None, description="Execution time in seconds")
     execution_status: ExecutionStatus = Field(default = ExecutionStatus.STARTED, description="Status of the execution event")
     message: Union[str, None] = Field(default=None, description="Optional message associated with the event")
+    detail: Union[str, None] = Field(default=None, description="Optional detailed information about the event")
     tag: str = Field(default="", description="Optional tag for categorizing the event")
+    max_detail_length: int = Field(default=500, description="Maximum length of detail string")
     
     def start_timer(self):
         self._start_time = time()
@@ -35,6 +37,23 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
         else:
             self.execution_time = None
     
+    def _serialize_detail(self, data: Any) -> str:
+        """Serialize data to string and truncate if needed."""
+        try:
+            if isinstance(data, BaseModel):
+                serialized = data.model_dump_json(indent=2)
+            elif isinstance(data, (dict, list)):
+                import json
+                serialized = json.dumps(data, indent=2, default=str)
+            else:
+                serialized = str(data)
+            
+            if len(serialized) > self.max_detail_length:
+                return serialized[:self.max_detail_length] + "..."
+            return serialized
+        except Exception:
+            return str(data)[:self.max_detail_length]
+    
     async def __call__(self, input_data, extra_context, execution_state: ExecutionState) -> ExecutionResult[OutputT]:
         """
         Execute the wrapped actor with full lifecycle management (async only).
@@ -44,18 +63,22 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # Run preconditions
             await self.actor.run_preconditions(input_data, extra_context, execution_state)
 
-            # Start timer and mark as started
+            # Start timer and mark as started with input details
             self.start_timer()
+            self.detail = self._serialize_detail(input_data)
             execution_state.add_event(self, ExecutionStatus.STARTED)
+            
             # Enforce async handler
             if not asyncio.iscoroutinefunction(self.actor.handler):
                 raise TypeError(f"Handler for actor '{self.actor.name}' must be async.")
             result = await self.actor.handler(input_data, extra_context, execution_state)
+            
             # Run postconditions
             await self.actor.run_postconditions(result, extra_context, execution_state)
 
-            # Stop timer and mark as completed
+            # Stop timer and mark as completed with result details
             self.stop_timer()
+            self.detail = self._serialize_detail(result)
             execution_state.add_event(self, ExecutionStatus.COMPLETED)
             return ExecutionResult[OutputT](
                 result=result,

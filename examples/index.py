@@ -161,6 +161,13 @@ class EventPrinter:
         self.show_timestamp = show_timestamp
         self.show_address = show_address
         self.indent_cache: dict[str, int] = {}
+        # Statistics tracking
+        self.total_events = 0
+        self.completed_events = 0
+        self.failed_events = 0
+        self.started_events = 0
+        self.total_execution_time = 0.0
+        self.events_by_type: dict[str, int] = {}
     
     def _get_indent_level(self, address: str) -> int:
         """Calculate indentation based on address depth."""
@@ -187,7 +194,23 @@ class EventPrinter:
     
     def print_event(self, event: ExecutionEvent):
         """Print a beautifully formatted event."""
+        # Track statistics
+        self.total_events += 1
         status = event.execution_status
+        
+        if status == ExecutionStatus.STARTED:
+            self.started_events += 1
+        elif status == ExecutionStatus.COMPLETED:
+            self.completed_events += 1
+            if event.execution_time:
+                self.total_execution_time += event.execution_time
+        elif status == ExecutionStatus.FAILED:
+            self.failed_events += 1
+        
+        # Track by event type
+        event_type = event.actor.event_type.value if hasattr(event.actor.event_type, 'value') else str(event.actor.event_type)
+        self.events_by_type[event_type] = self.events_by_type.get(event_type, 0) + 1
+        
         symbol, color, status_text = self.STATUS_CONFIG.get(
             status, ("?", self.WHITE, "UNKNOWN")
         )
@@ -229,6 +252,15 @@ class EventPrinter:
             )
             lines.append(time_line)
         
+        # Detail information (if available)
+        if event.detail:
+            detail_preview = self._truncate(event.detail.replace('\n', ' '), 100)
+            detail_icon = "📥" if status == ExecutionStatus.STARTED else "📤"
+            detail_line = (
+                f"{self.GRAY}{indent}  ├─ {detail_icon} {detail_preview}{self.RESET}"
+            )
+            lines.append(detail_line)
+        
         # Error message (if failed)
         if status == ExecutionStatus.FAILED and event.message:
             error_msg = self._truncate(event.message, 80)
@@ -243,6 +275,42 @@ class EventPrinter:
         
         # Print all lines
         print("\n".join(lines))
+    
+    def print_summary(self):
+        """Print execution summary statistics."""
+        print(f"\n{self.BOLD}{self.CYAN}{'═' * 70}{self.RESET}")
+        print(f"{self.BOLD}{self.CYAN}{'📊 EXECUTION SUMMARY':^70}{self.RESET}")
+        print(f"{self.BOLD}{self.CYAN}{'═' * 70}{self.RESET}\n")
+        
+        # Total events
+        print(f"{self.BOLD}Total Events:{self.RESET} {self.WHITE}{self.total_events}{self.RESET}")
+        print(f"  {self.CYAN}├─{self.RESET} Started: {self.CYAN}{self.started_events}{self.RESET}")
+        print(f"  {self.GREEN}├─{self.RESET} Completed: {self.GREEN}{self.completed_events}{self.RESET}")
+        print(f"  {self.RED}└─{self.RESET} Failed: {self.RED}{self.failed_events}{self.RESET}\n")
+        
+        # Success rate
+        if self.started_events > 0:
+            success_rate = (self.completed_events / self.started_events) * 100
+            rate_color = self.GREEN if success_rate >= 80 else (self.YELLOW if success_rate >= 50 else self.RED)
+            print(f"{self.BOLD}Success Rate:{self.RESET} {rate_color}{success_rate:.1f}%{self.RESET}\n")
+        
+        # Total execution time
+        time_str = self._format_time(self.total_execution_time)
+        print(f"{self.BOLD}Total Execution Time:{self.RESET} {self.MAGENTA}{time_str}{self.RESET}\n")
+        
+        # Events by type
+        if self.events_by_type:
+            print(f"{self.BOLD}Events by Type:{self.RESET}")
+            for event_type, count in sorted(self.events_by_type.items(), key=lambda x: x[1], reverse=True):
+                # Find matching icon by checking if event_type matches any EventType value
+                icon = "📌"
+                for et, et_icon in self.EVENT_ICONS.items():
+                    if (hasattr(et, 'value') and et.value == event_type) or str(et) == event_type:
+                        icon = et_icon
+                        break
+                print(f"  {icon} {event_type}: {self.BLUE}{count}{self.RESET}")
+        
+        print(f"\n{self.BOLD}{self.CYAN}{'═' * 70}{self.RESET}\n")
     
     def __call__(self, event: ExecutionEvent):
         """Allow using the printer as a callback."""
@@ -658,6 +726,9 @@ if __name__ == "__main__":
         print(f"\n{'═' * 60}")
         print(f"{'✅ EXECUTION FINISHED':^60}")
         print(f"{'═' * 60}\n")
+        
+        # Print summary statistics
+        printer.print_summary()
     
     asyncio.run(main())
         

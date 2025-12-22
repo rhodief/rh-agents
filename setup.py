@@ -1,10 +1,10 @@
 from setuptools import setup, find_packages
 
-with open("../README.md", "r") as fh:
+with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
-    name="rh-agents",
+    name="rh_agents",
     version="0.0.1-beta-1",
     author="rhodie",
     author_email="rhandref@gmail.com",

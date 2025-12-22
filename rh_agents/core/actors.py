@@ -1,16 +1,19 @@
 import asyncio
-from typing import Any, Callable, Generic, TypeVar, Union
+from typing import Any, Callable, Coroutine, Generic, TypeVar, Union
 from pydantic import BaseModel, Field
 from rh_agents.core.result_types import LLM_Result
 from rh_agents.core.types import EventType
 from rh_agents.core.execution import ExecutionState
+
+# Type alias for async handlers
+AsyncHandler = Callable[..., Coroutine[Any, Any, Any]]
 
 
 class BaseActor(BaseModel):
     name: str
     description: str
     input_model: type[BaseModel]
-    handler: Callable
+    handler: AsyncHandler
     output_model: Union[type[BaseModel], None] = None
     preconditions: list[Callable] = []
     postconditions: list[Callable] = []
@@ -37,7 +40,7 @@ class Tool(BaseActor):
     description: str
     input_model: type[BaseModel]
     output_model: Union[type[BaseModel], None] = None
-    handler: Callable
+    handler: AsyncHandler
     preconditions: list[Callable] = []
     postconditions: list[Callable] = []
     event_type: EventType = EventType.TOOL_CALL
@@ -76,17 +79,17 @@ class LLM(BaseActor, Generic[T]):
     description: str
     input_model: type[BaseModel]
     output_model: type[LLM_Result] = LLM_Result
-    handler: Callable[[T, str], LLM_Result]
+    handler: Callable[[T, str, ExecutionState], Coroutine[Any, Any, LLM_Result]]
     preconditions: list[Callable] = []
     postconditions: list[Callable] = []
-    event_type: EventType = EventType.LLM_CALL
+    event_type: EventType = EventType.LLM_CALL    
     
     
 
 class Agent(BaseActor):
     name: str
     description: str
-    handler: Callable
+    handler: AsyncHandler
     preconditions: list[Callable] = []
     postconditions: list[Callable] = []
     event_type: EventType = EventType.AGENT_CALL

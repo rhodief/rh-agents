@@ -49,21 +49,30 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # Enforce async handler
             if not asyncio.iscoroutinefunction(self.actor.handler):
                 raise TypeError(f"Handler for actor '{self.actor.name}' must be async.")
-            result = await self.actor.handler(input_data, execution_state)
+            result = await self.actor.handler(input_data, extra_context, execution_state)
             # Run postconditions
             await self.actor.run_postconditions(result, extra_context, execution_state)
 
             # Stop timer and mark as completed
             self.stop_timer()
             execution_state.add_event(self, ExecutionStatus.COMPLETED)
-            return result
+            return ExecutionResult[OutputT](
+                result=result,
+                execution_time=self.execution_time,
+                ok=True
+            )
 
         except Exception as e:
             # Stop timer, mark as failed and capture error message
             self.stop_timer()
             self.message = str(e)
             execution_state.add_event(self, ExecutionStatus.FAILED)
-            raise
+            return ExecutionResult[OutputT](
+                result=None,
+                execution_time=self.execution_time,
+                ok=False,
+                erro_message=str(e)
+            )
 
         finally:
             execution_state.pop_context()

@@ -58,8 +58,8 @@ class EventBus(BaseModel):
         for handler in self.subscribers:
             handler(event)
 
-    def event_stream(self):
-        """Generator for all published events (for async-style consumption)."""
+    async def event_stream(self):
+        """Async generator for all published events."""
         for event in self.events:
             yield event
 

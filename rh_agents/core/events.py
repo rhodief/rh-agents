@@ -27,6 +27,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     detail: Union[str, None] = Field(default=None, description="Optional detailed information about the event")
     tag: str = Field(default="", description="Optional tag for categorizing the event")
     max_detail_length: int = Field(default=500, description="Maximum length of detail string")
+    from_cache: bool = Field(default=False, description="Whether the result was recovered from cache")
     
     def start_timer(self):
         self._start_time = time()
@@ -54,12 +55,82 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
         except Exception:
             return str(data)[:self.max_detail_length]
     
+    def __try_retrieve_from_cache(self, input_data: Any, execution_state: ExecutionState) -> Union[ExecutionResult[OutputT], None]:
+        """
+        Attempt to retrieve cached result if caching is enabled.
+        Returns cached ExecutionResult if found, None otherwise.
+        """
+        if not self.actor.cacheable or execution_state.cache_backend is None:
+            return None
+        
+        from rh_agents.core.cache import compute_cache_key
+        
+        # Compute cache key based on address, input, actor name and version
+        temp_address = execution_state.get_current_address(self.actor.event_type)
+        cache_key, input_hash = compute_cache_key(
+            temp_address,
+            input_data,
+            self.actor.name,
+            self.actor.version
+        )
+        
+        # Try to get from cache
+        cached = execution_state.cache_backend.get(cache_key)
+        if cached is None:
+            return None
+        
+        # Cache hit! Prepare for return
+        self.from_cache = True
+        self.execution_time = 0.0
+        self.detail = f"[CACHED] {self._serialize_detail(cached.result.result)}"
+        self.message = f"Recovered from cache (saved at {cached.cached_at})"
+        execution_state.add_event(self, ExecutionStatus.RECOVERED)
+        
+        return cached.result
+    
+    def __store_result_in_cache(self, input_data: Any, execution_result: ExecutionResult[OutputT], execution_state: ExecutionState):
+        """
+        Store execution result in cache if caching is enabled.
+        """
+        if not self.actor.cacheable or execution_state.cache_backend is None:
+            return
+        
+        from rh_agents.core.cache import CachedResult, compute_cache_key
+        
+        temp_address = execution_state.get_current_address(self.actor.event_type)
+        cache_key, input_hash = compute_cache_key(
+            temp_address,
+            input_data,
+            self.actor.name,
+            self.actor.version
+        )
+        
+        cached_result = CachedResult(
+            result=execution_result,
+            input_hash=input_hash,
+            cache_key=cache_key,
+            actor_name=self.actor.name,
+            actor_version=self.actor.version
+        )
+        
+        execution_state.cache_backend.set(
+            cache_key,
+            cached_result,
+            ttl=self.actor.cache_ttl
+        )
+    
     async def __call__(self, input_data, extra_context, execution_state: ExecutionState) -> ExecutionResult[OutputT]:
         """
-        Execute the wrapped actor with full lifecycle management (async only).
+        Execute the wrapped actor with full lifecycle management and caching support (async only).
         """
         execution_state.push_context(f'{self.actor.name}{"::" + self.tag if self.tag else ""}')
+        
         try:
+            # Try to retrieve from cache
+            cached_result = self.__try_retrieve_from_cache(input_data, execution_state)
+            if cached_result is not None:
+                return cached_result
+            
             # Run preconditions
             await self.actor.run_preconditions(input_data, extra_context, execution_state)
 
@@ -80,11 +151,17 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             self.stop_timer()
             self.detail = self._serialize_detail(result)
             execution_state.add_event(self, ExecutionStatus.COMPLETED)
-            return ExecutionResult[OutputT](
+            
+            execution_result = ExecutionResult[OutputT](
                 result=result,
                 execution_time=self.execution_time,
                 ok=True
             )
+            
+            # Store result in cache
+            self.__store_result_in_cache(input_data, execution_result, execution_state)
+            
+            return execution_result
 
         except Exception as e:
             # Stop timer, mark as failed and capture error message

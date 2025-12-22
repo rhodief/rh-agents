@@ -13,3 +13,4 @@ class ExecutionStatus(str, Enum):
     FAILED = 'failed'
     AWAITING = 'awaiting'
     HUMAN_INTERVENTION = 'human_intervention'
+    RECOVERED = 'recovered'

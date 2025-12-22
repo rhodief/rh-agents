@@ -66,7 +66,8 @@ class DoctrineTool(Tool):
             name="DoctrineTool",
             description=DOCTRINE_TOOL_PROMPT,
             input_model=Doctrine,
-            handler=lambda args: args
+            handler=lambda args: args,
+            cacheable=True            
         )
 
 class ListPecasArgs(BaseModel):
@@ -108,6 +109,7 @@ class DoctrineReceverAgent(Agent):
                 prompt=input_data.content,
                 model=MODEL,
                 max_completion_tokens=MAX_TOKENS,
+                temperature=1,
                 tools=ToolSet(tools if tools else []),
                 tool_choice={"type": "function", "function": {"name": "DoctrineTool"}}
             )
@@ -165,6 +167,7 @@ class StepExecutorAgent(Agent):
                 prompt=input_data.description,
                 model=MODEL,
                 max_completion_tokens=MAX_TOKENS,
+                temperature=1,
                 tools=tool_set
             )
             execution_result = await llm_event(llm_input, context, execution_state)
@@ -278,6 +281,7 @@ class ReviewerAgent(Agent):
                 prompt=user_prompt,
                 model=MODEL,
                 max_completion_tokens=MAX_TOKENS,
+                temperature=1,
                 tools=tool_set
             )
             

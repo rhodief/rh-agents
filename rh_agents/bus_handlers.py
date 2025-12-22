@@ -34,6 +34,7 @@ class EventPrinter:
         ExecutionStatus.FAILED: ("✖", RED, "FAILED"),
         ExecutionStatus.AWAITING: ("⏳", YELLOW, "AWAITING"),
         ExecutionStatus.HUMAN_INTERVENTION: ("👤", MAGENTA, "HUMAN"),
+        ExecutionStatus.RECOVERED: ("♻", YELLOW, "RECOVERED"),
     }
     
     # Event type icons
@@ -52,8 +53,11 @@ class EventPrinter:
         self.completed_events = 0
         self.failed_events = 0
         self.started_events = 0
+        self.recovered_events = 0
         self.total_execution_time = 0.0
         self.events_by_type: dict[str, int] = {}
+        self.cache_hits = 0
+        self.cache_misses = 0
     
     def _get_indent_level(self, address: str) -> int:
         """Calculate indentation based on address depth."""
@@ -86,12 +90,16 @@ class EventPrinter:
         
         if status == ExecutionStatus.STARTED:
             self.started_events += 1
+            self.cache_misses += 1
         elif status == ExecutionStatus.COMPLETED:
             self.completed_events += 1
             if event.execution_time:
                 self.total_execution_time += event.execution_time
         elif status == ExecutionStatus.FAILED:
             self.failed_events += 1
+        elif status == ExecutionStatus.RECOVERED:
+            self.recovered_events += 1
+            self.cache_hits += 1
         
         # Track by event type
         event_type = event.actor.event_type.value if hasattr(event.actor.event_type, 'value') else str(event.actor.event_type)
@@ -142,10 +150,25 @@ class EventPrinter:
         if event.detail:
             detail_preview = self._truncate(event.detail.replace('\n', ' '), 100)
             detail_icon = "📥" if status == ExecutionStatus.STARTED else "📤"
+            
+            # Special icon for cached results
+            if event.from_cache and status == ExecutionStatus.RECOVERED:
+                detail_icon = "💾"
+                detail_preview = f"{self.YELLOW}[FROM CACHE]{self.RESET} {detail_preview}"
+            
             detail_line = (
                 f"{self.GRAY}{indent}  ├─ {detail_icon} {detail_preview}{self.RESET}"
             )
             lines.append(detail_line)
+        
+        # Cache message (if recovered from cache)
+        if status == ExecutionStatus.RECOVERED and event.message:
+            cache_msg = self._truncate(event.message, 80)
+            cache_line = (
+                f"{self.GRAY}{indent}  ├─ {self.RESET}"
+                f"{self.YELLOW}✨ {cache_msg}{self.RESET}"
+            )
+            lines.append(cache_line)
         
         # Error message (if failed)
         if status == ExecutionStatus.FAILED and event.message:
@@ -172,6 +195,7 @@ class EventPrinter:
         print(f"{self.BOLD}Total Events:{self.RESET} {self.WHITE}{self.total_events}{self.RESET}")
         print(f"  {self.CYAN}├─{self.RESET} Started: {self.CYAN}{self.started_events}{self.RESET}")
         print(f"  {self.GREEN}├─{self.RESET} Completed: {self.GREEN}{self.completed_events}{self.RESET}")
+        print(f"  {self.YELLOW}├─{self.RESET} Recovered: {self.YELLOW}{self.recovered_events}{self.RESET}")
         print(f"  {self.RED}└─{self.RESET} Failed: {self.RED}{self.failed_events}{self.RESET}\n")
         
         # Success rate
@@ -179,6 +203,17 @@ class EventPrinter:
             success_rate = (self.completed_events / self.started_events) * 100
             rate_color = self.GREEN if success_rate >= 80 else (self.YELLOW if success_rate >= 50 else self.RED)
             print(f"{self.BOLD}Success Rate:{self.RESET} {rate_color}{success_rate:.1f}%{self.RESET}\n")
+        
+        # Cache statistics
+        if self.cache_hits > 0 or self.cache_misses > 0:
+            total_cacheable = self.cache_hits + self.cache_misses
+            cache_hit_rate = (self.cache_hits / total_cacheable) * 100 if total_cacheable > 0 else 0
+            cache_color = self.GREEN if cache_hit_rate >= 50 else (self.YELLOW if cache_hit_rate >= 25 else self.CYAN)
+            
+            print(f"{self.BOLD}Cache Performance:{self.RESET}")
+            print(f"  {self.GREEN}├─{self.RESET} Hits: {self.GREEN}{self.cache_hits}{self.RESET}")
+            print(f"  {self.CYAN}├─{self.RESET} Misses: {self.CYAN}{self.cache_misses}{self.RESET}")
+            print(f"  {cache_color}└─{self.RESET} Hit Rate: {cache_color}{cache_hit_rate:.1f}%{self.RESET}\n")
         
         # Total execution time
         time_str = self._format_time(self.total_execution_time)

@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import Any, Callable, Union
-from pydantic import BaseModel, Field
+from typing import Any, Callable, Union, Optional
+from pydantic import BaseModel, Field, field_serializer
 from rh_agents.core.types import EventType, ExecutionStatus
 
 
@@ -70,6 +70,22 @@ class ExecutionState(BaseModel):
     history: HistorySet = Field(default_factory=HistorySet)
     event_bus: EventBus = Field(default_factory=EventBus)    
     execution_stack: list[str] = Field(default_factory=list, description="Stack tracking current execution path (agent/tool names)")
+    _cache_backend: Optional[Any] = None  # Private field to avoid serialization issues
+    
+    @property
+    def cache_backend(self) -> Optional[Any]:
+        """Get the cache backend instance."""
+        return self._cache_backend
+    
+    @cache_backend.setter
+    def cache_backend(self, value: Optional[Any]):
+        """Set the cache backend instance."""
+        self._cache_backend = value
+    
+    def __init__(self, cache_backend: Optional[Any] = None, **data):
+        """Initialize ExecutionState with optional cache backend."""
+        super().__init__(**data)
+        self._cache_backend = cache_backend
     
     
     def get_current_address(self, event_type: EventType) -> str:

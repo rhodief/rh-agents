@@ -135,7 +135,9 @@ class DoctrineReceverAgent(Agent):
             handler=handler,
             event_type=EventType.AGENT_CALL,
             llm=llm,
-            tools=ToolSet(tools) if tools else ToolSet()
+            tools=ToolSet(tools) if tools else ToolSet(),
+            is_artifact=True,
+            cacheable=True
         )
 
 class StepExecutorAgent(Agent):

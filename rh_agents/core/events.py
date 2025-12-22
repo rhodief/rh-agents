@@ -58,9 +58,10 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     def __try_retrieve_from_cache(self, input_data: Any, execution_state: ExecutionState) -> Union[ExecutionResult[OutputT], None]:
         """
         Attempt to retrieve cached result if caching is enabled.
+        For artifacts, checks ExecutionState storage first, then cache backend.
         Returns cached ExecutionResult if found, None otherwise.
         """
-        if not self.actor.cacheable or execution_state.cache_backend is None:
+        if not self.actor.cacheable:
             return None
         
         from rh_agents.core.cache import compute_cache_key
@@ -74,10 +75,55 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             self.actor.version
         )
         
-        # Try to get from cache
+        # For artifacts, check ExecutionState storage first for fast access
+        if self.actor.is_artifact:
+            artifact = execution_state.storage.get_artifact(cache_key)
+            if artifact is not None:
+                # Artifact hit in memory! Prepare for return
+                self.from_cache = True
+                self.execution_time = 0.0
+                self.detail = f"[ARTIFACT:MEMORY] {self._serialize_detail(artifact.result)}"
+                self.message = f"Recovered from artifact storage (in-memory)"
+                execution_state.add_event(self, ExecutionStatus.RECOVERED)
+                return artifact
+            
+            # Not in memory, check cache backend for persistence
+            if execution_state.cache_backend is not None:
+                cached = execution_state.cache_backend.get(cache_key)
+                if cached is not None:
+                    # Reconstruct the result object using actor's output_model if it's a dict
+                    if isinstance(cached.result.result, dict) and self.actor.output_model is not None:
+                        try:
+                            cached.result.result = self.actor.output_model(**cached.result.result)
+                        except Exception:
+                            pass  # If reconstruction fails, use dict as-is
+                    
+                    # Artifact hit in cache! Store in ExecutionState for future access
+                    execution_state.storage.set_artifact(cache_key, cached.result)
+                    self.from_cache = True
+                    self.execution_time = 0.0
+                    self.detail = f"[ARTIFACT:CACHE] {self._serialize_detail(cached.result.result)}"
+                    self.message = f"Recovered from artifact cache (saved at {cached.cached_at})"
+                    execution_state.add_event(self, ExecutionStatus.RECOVERED)
+                    return cached.result
+            
+            # Artifact not found in either location
+            return None
+        
+        # For regular actors, try to get from cache backend
+        if execution_state.cache_backend is None:
+            return None
+            
         cached = execution_state.cache_backend.get(cache_key)
         if cached is None:
             return None
+        
+        # Reconstruct the result object using actor's output_model if it's a dict
+        if isinstance(cached.result.result, dict) and self.actor.output_model is not None:
+            try:
+                cached.result.result = self.actor.output_model(**cached.result.result)
+            except Exception:
+                pass  # If reconstruction fails, use dict as-is
         
         # Cache hit! Prepare for return
         self.from_cache = True
@@ -91,8 +137,9 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     def __store_result_in_cache(self, input_data: Any, execution_result: ExecutionResult[OutputT], execution_state: ExecutionState):
         """
         Store execution result in cache if caching is enabled.
+        For artifacts, stores in BOTH ExecutionState storage (for fast access) AND cache backend (for persistence).
         """
-        if not self.actor.cacheable or execution_state.cache_backend is None:
+        if not self.actor.cacheable:
             return
         
         from rh_agents.core.cache import CachedResult, compute_cache_key
@@ -105,6 +152,31 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             self.actor.version
         )
         
+        # For artifacts, store in BOTH ExecutionState storage AND cache backend
+        if self.actor.is_artifact:
+            # Store in ExecutionState for fast within-session access
+            execution_state.storage.set_artifact(cache_key, execution_result)
+            
+            # Also store in cache backend for cross-execution persistence
+            if execution_state.cache_backend is not None:
+                cached_result = CachedResult(
+                    result=execution_result,
+                    input_hash=input_hash,
+                    cache_key=cache_key,
+                    actor_name=self.actor.name,
+                    actor_version=self.actor.version
+                )
+                execution_state.cache_backend.set(
+                    cache_key,
+                    cached_result,
+                    ttl=self.actor.cache_ttl
+                )
+            return
+        
+        # For regular results, store in cache backend (requires cache_backend)
+        if execution_state.cache_backend is None:
+            return
+            
         cached_result = CachedResult(
             result=execution_result,
             input_hash=input_hash,

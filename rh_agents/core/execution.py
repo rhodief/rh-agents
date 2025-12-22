@@ -6,12 +6,25 @@ from rh_agents.core.types import EventType, ExecutionStatus
 
 class ExecutionStore(BaseModel):
     data: dict[str, str] = Field(default_factory=dict)
+    artifacts: dict[str, Any] = Field(default_factory=dict)
     
     def get(self, key: str) -> str | None:
         return self.data.get(key, None)
     
     def set(self, key: str, value: str):
         self.data[key] = value
+    
+    def get_artifact(self, key: str) -> Any | None:
+        """Retrieve an artifact by key."""
+        return self.artifacts.get(key, None)
+    
+    def set_artifact(self, key: str, value: Any):
+        """Store an artifact by key."""
+        self.artifacts[key] = value
+    
+    def has_artifact(self, key: str) -> bool:
+        """Check if an artifact exists."""
+        return key in self.artifacts
 
 
 class HistorySet(BaseModel):

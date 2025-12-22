@@ -116,6 +116,26 @@ class FileCacheBackend(CacheBackend):
         try:
             with open(cache_path, 'r') as f:
                 data = json.load(f)
+                
+                # Reconstruct ExecutionResult from dict if needed
+                if isinstance(data.get('result'), dict) and not isinstance(data['result'], type):
+                    from rh_agents.core.events import ExecutionResult
+                    exec_result_data = data['result']
+                    
+                    # Also reconstruct the nested result object (e.g., Doctrine) if it's a dict
+                    if isinstance(exec_result_data.get('result'), dict):
+                        # Try to reconstruct using Pydantic model validation
+                        # This will work for any BaseModel subclass
+                        try:
+                            from pydantic import BaseModel, ValidationError
+                            # Leave as dict - the actor's handler will need to handle this
+                            # or we parse it later when we know the type
+                            pass
+                        except Exception:
+                            pass
+                    
+                    data['result'] = ExecutionResult(**exec_result_data)
+                
                 cached = CachedResult(**data)
             
             if cached.is_expired():
@@ -128,7 +148,7 @@ class FileCacheBackend(CacheBackend):
             self._save_index()
             return cached
             
-        except Exception:
+        except Exception as e:
             self._misses += 1
             self._save_index()
             return None

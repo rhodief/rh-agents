@@ -21,6 +21,7 @@ class BaseActor(BaseModel):
     cacheable: bool = Field(default=False, description="Whether execution results should be cached")
     version: str = Field(default="1.0.0", description="Actor version for cache invalidation")
     cache_ttl: Union[int, None] = Field(default=None, description="Cache TTL in seconds, None means no expiration")
+    is_artifact: bool = Field(default=False, description="Whether this actor produces artifacts that should be stored separately")
     
     async def run_preconditions(self, input_data, extra_context, execution_state: ExecutionState):
         """Run all precondition checks before execution (async)"""
@@ -50,6 +51,7 @@ class Tool(BaseActor):
     cacheable: bool = Field(default=False, description="Tools are not cacheable by default (side effects)")
     version: str = Field(default="1.0.0", description="Tool version for cache invalidation")
     cache_ttl: Union[int, None] = Field(default=None, description="Cache TTL in seconds")
+    is_artifact: bool = Field(default=False, description="Whether this tool produces artifacts")
     
     def model_post_init(self, __context) -> None:
         if self.output_model is None:
@@ -94,7 +96,8 @@ class LLM(BaseActor, Generic[T]):
     event_type: EventType = EventType.LLM_CALL
     cacheable: bool = Field(default=True, description="LLM calls are cacheable by default")
     version: str = Field(default="1.0.0", description="LLM version for cache invalidation")
-    cache_ttl: Union[int, None] = Field(default=3600, description="Default 1 hour TTL for LLM results")    
+    cache_ttl: Union[int, None] = Field(default=3600, description="Default 1 hour TTL for LLM results")
+    is_artifact: bool = Field(default=False, description="Whether this LLM produces artifacts")    
     
     
 
@@ -107,5 +110,7 @@ class Agent(BaseActor):
     event_type: EventType = EventType.AGENT_CALL
     tools: ToolSet
     llm: LLM | None = None
+    is_artifact: bool = Field(default=False, description="Whether this agent produces artifacts")
+    cacheable: bool = Field(default=False, description="Agents are not cacheable by default")
     
     

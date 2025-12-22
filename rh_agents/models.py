@@ -8,3 +8,4 @@ class AuthorType(str, Enum):
 class Message(BaseModel):
     content: str
     author: AuthorType
+    

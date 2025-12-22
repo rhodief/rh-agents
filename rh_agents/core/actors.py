@@ -68,8 +68,11 @@ class ToolSet(BaseModel):
     def get_tool_list(self) -> list[Tool]:
         return list(self.__tools.values())
     
-    def __getitem__(self, key: str) -> Tool:
-        return self.__tools[key]
+    def __getitem__(self, key: str) -> Tool | None:
+        return self.__tools.get(key)
+    
+    def get(self, key: str) -> Union[Tool, None]:
+        return self.__tools.get(key, None)
 
 
 T = TypeVar('T', bound=Any)

@@ -209,11 +209,11 @@ def tool_to_openai_function(tool) -> Dict[str, Any]:
     """
     from rh_agents.core.actors import Tool
     
-    if not isinstance(tool, Tool) or tool.output_model is None:
+    if not isinstance(tool, Tool) or tool.input_model is None:
         raise ValueError(f"Expected Tool instance, got {type(tool)}")
     
     # Use Pydantic's built-in model_json_schema to generate the parameters schema
-    parameters = tool.output_model.model_json_schema()    
+    parameters = tool.input_model.model_json_schema()    
     
     return {
         "name": tool.name,

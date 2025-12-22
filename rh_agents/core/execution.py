@@ -71,6 +71,7 @@ class ExecutionState(BaseModel):
     event_bus: EventBus = Field(default_factory=EventBus)    
     execution_stack: list[str] = Field(default_factory=list, description="Stack tracking current execution path (agent/tool names)")
     
+    
     def get_current_address(self, event_type: EventType) -> str:
         """Build address from execution stack + event type, e.g. 'doctrine_agent::tool_call'"""
         if not self.execution_stack:
@@ -93,5 +94,29 @@ class ExecutionState(BaseModel):
         event.execution_status = status
         self.history.add(event)
         self.event_bus.publish(event)
-
+        
+    def add_step_result(self, step_index: int, value: Any):
+        """Store step result in execution storage with key 'step_{index}'"""
+        self.storage.set(f"step::{step_index}", str(value))
+        
+    def get_steps_result(self, step_index: list[int]) -> list[Any]:
+        """Retrieve step result from execution storage with key 'step_{index}'"""
+        results = []
+        for index in step_index:
+            item = self.storage.get(f"step::{index}")
+            if item is not None:
+                results.append(item)
+        return results
+    
+    def get_last_step_result(self) -> Any | None:
+        """Retrieve last step result from execution storage with key 'step_{index}'"""
+        step_keys = [key for key in self.storage.data.keys() if key.startswith("step::")]
+        if not step_keys:
+            return None
+        last_key = max(step_keys, key=lambda k: int(k.split("::")[1]))
+        return self.storage.get(last_key)
+            
+    def get_all_steps_results(self) -> dict[str, str]:
+        """Retrieve all stored execution results"""
+        return self.storage.data.copy()
     

@@ -24,6 +24,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     execution_time: Union[float, None] = Field(default=None, description="Execution time in seconds")
     execution_status: ExecutionStatus = Field(default = ExecutionStatus.STARTED, description="Status of the execution event")
     message: Union[str, None] = Field(default=None, description="Optional message associated with the event")
+    tag: str = Field(default="", description="Optional tag for categorizing the event")
     
     def start_timer(self):
         self._start_time = time()
@@ -38,7 +39,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
         """
         Execute the wrapped actor with full lifecycle management (async only).
         """
-        execution_state.push_context(self.actor.name)
+        execution_state.push_context(f'{self.actor.name}{"::" + self.tag if self.tag else ""}')
         try:
             # Run preconditions
             await self.actor.run_preconditions(input_data, extra_context, execution_state)

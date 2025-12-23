@@ -12,3 +12,4 @@ env/
 =1.0.0
 rh_agents.egg-info
 examples/.cache/
+examples/.cache/executions/cache_index.json

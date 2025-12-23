@@ -42,13 +42,12 @@
 
         async function startStream() {
             log('Starting stream...');
-            
             try {
                 const response = await fetch('/api/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        query: 'Liste as peças do tipo DEC_ADM',
+                        query: 'Faça um relatório com o resumo dos óbices jurídicos da decisão de Admissibilidade.',
                         use_cache: false
                     })
                 });
@@ -62,26 +61,22 @@
 
                 while (true) {
                     const { value, done } = await reader.read();
-                    
                     if (done) {
                         log('Stream complete! Total events: ' + eventCount);
                         break;
                     }
-
                     const chunk = decoder.decode(value, { stream: true });
                     log('Chunk received (' + chunk.length + ' bytes)');
                     buffer += chunk;
-                    
                     const lines = buffer.split('\n');
                     buffer = lines.pop();
-
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
                             eventCount++;
                             const data = line.slice(6);
                             try {
                                 const event = JSON.parse(data);
-                                log('EVENT #' + eventCount + ': ' + event.event_type + ' - ' + (event.detail || event.message || ''));
+                                renderEvent(event, eventCount);
                             } catch (e) {
                                 log('Parse error: ' + e.message);
                             }
@@ -94,6 +89,30 @@
                 log('ERROR: ' + error.message);
                 console.error(error);
             }
+        }
+
+        function renderEvent(event, eventCount) {
+            const div = document.createElement('div');
+            div.className = 'event';
+            let html = '';
+            html += `<b>EVENT #${eventCount}</b><br/>`;
+            if (event.datetime) {
+                html += `<span style="color:#888">${event.datetime}</span><br/>`;
+            }
+            if (event.actor && event.actor.name) {
+                html += `<b>Actor:</b> ${event.actor.name}<br/>`;
+            }
+            if (event.event_type) {
+                html += `<b>Type:</b> ${event.event_type}<br/>`;
+            }
+            if (event.detail) {
+                html += `<b>Detail:</b> <pre style="white-space:pre-wrap;">${event.detail}</pre>`;
+            } else if (event.message) {
+                html += `<b>Message:</b> <pre style="white-space:pre-wrap;">${event.message}</pre>`;
+            }
+            div.innerHTML = html;
+            output.appendChild(div);
+            output.scrollTop = output.scrollHeight;
         }
     </script>
 </body>

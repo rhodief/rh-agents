@@ -369,7 +369,7 @@
 
             const typeSpan = document.createElement('span');
             typeSpan.className = 'event-type';
-            typeSpan.textContent = eventData.event_type.replace(/_/g, ' ');
+            typeSpan.textContent = eventData.actor ? eventData.actor.event_type.replace(/_/g, ' ') : eventData.event_type.replace(/_/g, ' ');
 
             const timeSpan = document.createElement('span');
             timeSpan.className = 'event-timestamp';
@@ -382,7 +382,7 @@
             if (eventData.actor_name) {
                 const actorDiv = document.createElement('div');
                 actorDiv.className = 'event-actor';
-                actorDiv.textContent = `Actor: ${eventData.actor_name}`;
+                actorDiv.textContent = `Actor: ${eventData.actor.name}`;
                 eventDiv.appendChild(actorDiv);
             }
 

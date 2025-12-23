@@ -3,7 +3,7 @@ import asyncio
 import datetime
 from time import time
 from typing import Self, Union, TypeVar, Generic, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 from rh_agents.core.types import ExecutionStatus
 from rh_agents.core.actors import BaseActor
 from rh_agents.core.execution import ExecutionState
@@ -28,6 +28,14 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     tag: str = Field(default="", description="Optional tag for categorizing the event")
     max_detail_length: int = Field(default=500, description="Maximum length of detail string")
     from_cache: bool = Field(default=False, description="Whether the result was recovered from cache")
+    
+    @field_serializer('actor')
+    def serialize_actor(self, actor: BaseActor) -> dict:
+        """Serialize actor to a JSON-safe dict with only relevant fields."""
+        return {
+            "name": actor.name,
+            "event_type": actor.event_type.value,
+        }
     
     def start_timer(self):
         self._start_time = time()
@@ -55,7 +63,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
         except Exception:
             return str(data)[:self.max_detail_length]
     
-    def __try_retrieve_from_cache(self, input_data: Any, execution_state: ExecutionState) -> Union[ExecutionResult[OutputT], None]:
+    async def __try_retrieve_from_cache(self, input_data: Any, execution_state: ExecutionState) -> Union[ExecutionResult[OutputT], None]:
         """
         Attempt to retrieve cached result if caching is enabled.
         For artifacts, checks ExecutionState storage first, then cache backend.
@@ -84,7 +92,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
                 self.execution_time = 0.0
                 self.detail = f"[ARTIFACT:MEMORY] {self._serialize_detail(artifact.result)}"
                 self.message = f"Recovered from artifact storage (in-memory)"
-                execution_state.add_event(self, ExecutionStatus.RECOVERED)
+                await execution_state.add_event(self, ExecutionStatus.RECOVERED)
                 return artifact
             
             # Not in memory, check cache backend for persistence
@@ -104,7 +112,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
                     self.execution_time = 0.0
                     self.detail = f"[ARTIFACT:CACHE] {self._serialize_detail(cached.result.result)}"
                     self.message = f"Recovered from artifact cache (saved at {cached.cached_at})"
-                    execution_state.add_event(self, ExecutionStatus.RECOVERED)
+                    await execution_state.add_event(self, ExecutionStatus.RECOVERED)
                     return cached.result
             
             # Artifact not found in either location
@@ -130,7 +138,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
         self.execution_time = 0.0
         self.detail = f"[CACHED] {self._serialize_detail(cached.result.result)}"
         self.message = f"Recovered from cache (saved at {cached.cached_at})"
-        execution_state.add_event(self, ExecutionStatus.RECOVERED)
+        await execution_state.add_event(self, ExecutionStatus.RECOVERED)
         
         return cached.result
     
@@ -199,7 +207,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
         
         try:
             # Try to retrieve from cache
-            cached_result = self.__try_retrieve_from_cache(input_data, execution_state)
+            cached_result = await self.__try_retrieve_from_cache(input_data, execution_state)
             if cached_result is not None:
                 return cached_result
             
@@ -209,7 +217,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # Start timer and mark as started with input details
             self.start_timer()
             self.detail = self._serialize_detail(input_data)
-            execution_state.add_event(self, ExecutionStatus.STARTED)
+            await execution_state.add_event(self, ExecutionStatus.STARTED)
             
             # Enforce async handler
             if not asyncio.iscoroutinefunction(self.actor.handler):
@@ -222,7 +230,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # Stop timer and mark as completed with result details
             self.stop_timer()
             self.detail = self._serialize_detail(result)
-            execution_state.add_event(self, ExecutionStatus.COMPLETED)
+            await execution_state.add_event(self, ExecutionStatus.COMPLETED)
             
             execution_result = ExecutionResult[OutputT](
                 result=result,
@@ -239,7 +247,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # Stop timer, mark as failed and capture error message
             self.stop_timer()
             self.message = str(e)
-            execution_state.add_event(self, ExecutionStatus.FAILED)
+            await execution_state.add_event(self, ExecutionStatus.FAILED)
             return ExecutionResult[OutputT](
                 result=None,
                 execution_time=self.execution_time,

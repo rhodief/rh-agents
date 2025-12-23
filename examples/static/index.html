@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RH Agents Streaming Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .input-section {
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 100px;
+            font-family: inherit;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #d0d0d0;
+        }
+
+        .events-section {
+            margin-top: 30px;
+        }
+
+        .events-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .events-header h2 {
+            color: #333;
+        }
+
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-idle {
+            background: #e0e0e0;
+            color: #666;
+        }
+
+        .status-streaming {
+            background: #4caf50;
+            color: white;
+            animation: pulse 2s infinite;
+        }
+
+        .status-error {
+            background: #f44336;
+            color: white;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .events-container {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 20px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .event-item {
+            background: white;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .event-item.cached {
+            border-left-color: #ff9800;
+        }
+
+        .event-item.error {
+            border-left-color: #f44336;
+        }
+
+        .event-item.complete {
+            border-left-color: #4caf50;
+        }
+
+        .event-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .event-type {
+            font-weight: 600;
+            color: #667eea;
+            text-transform: uppercase;
+            font-size: 12px;
+        }
+
+        .event-timestamp {
+            font-size: 11px;
+            color: #999;
+        }
+
+        .event-actor {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .event-detail {
+            color: #333;
+            font-size: 14px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .event-cached {
+            display: inline-block;
+            background: #ff9800;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-top: 5px;
+        }
+
+        .cache-stats {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+
+        .cache-stats h4 {
+            color: #1976d2;
+            margin-bottom: 10px;
+        }
+
+        .cache-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .cache-stat-item {
+            background: white;
+            padding: 10px;
+            border-radius: 6px;
+        }
+
+        .cache-stat-label {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .cache-stat-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1976d2;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            opacity: 0.3;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 RH Agents Streaming Demo</h1>
+            <p>Watch agent execution events in real-time</p>
+        </div>
+
+        <div class="content">
+            <div class="input-section">
+                <div class="input-group">
+                    <label for="queryInput">Your Query</label>
+                    <textarea 
+                        id="queryInput" 
+                        placeholder="Enter your query here... (e.g., Faça um relatório com o resumo dos óbices jurídicos da decisão de Admissibilidade.)"
+                    >Faça um relatório com o resumo dos óbices jurídicos da decisão de Admissibilidade.</textarea>
+                </div>
+
+                <div class="input-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="useCacheCheckbox" checked>
+                        <label for="useCacheCheckbox" style="margin-bottom: 0;">Enable caching</label>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button id="startBtn" class="btn-primary">🚀 Start Execution</button>
+                    <button id="clearBtn" class="btn-secondary">🗑️ Clear Events</button>
+                </div>
+            </div>
+
+            <div class="events-section">
+                <div class="events-header">
+                    <h2>Event Stream</h2>
+                    <span id="statusBadge" class="status-badge status-idle">Idle</span>
+                </div>
+                <div class="events-container" id="eventsContainer">
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        <p>No events yet. Click "Start Execution" to begin.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const queryInput = document.getElementById('queryInput');
+        const useCacheCheckbox = document.getElementById('useCacheCheckbox');
+        const startBtn = document.getElementById('startBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const eventsContainer = document.getElementById('eventsContainer');
+        const statusBadge = document.getElementById('statusBadge');
+
+        let eventSource = null;
+
+        function setStatus(status) {
+            statusBadge.className = `status-badge status-${status}`;
+            statusBadge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        }
+
+        function addEvent(eventData) {
+            // Remove empty state if present
+            const emptyState = eventsContainer.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
+            }
+
+            const eventDiv = document.createElement('div');
+            eventDiv.className = `event-item ${eventData.cached ? 'cached' : ''} ${eventData.event_type}`;
+
+            const header = document.createElement('div');
+            header.className = 'event-header';
+
+            const typeSpan = document.createElement('span');
+            typeSpan.className = 'event-type';
+            typeSpan.textContent = eventData.event_type.replace(/_/g, ' ');
+
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'event-timestamp';
+            timeSpan.textContent = eventData.timestamp || new Date().toLocaleTimeString();
+
+            header.appendChild(typeSpan);
+            header.appendChild(timeSpan);
+            eventDiv.appendChild(header);
+
+            if (eventData.actor_name) {
+                const actorDiv = document.createElement('div');
+                actorDiv.className = 'event-actor';
+                actorDiv.textContent = `Actor: ${eventData.actor_name}`;
+                eventDiv.appendChild(actorDiv);
+            }
+
+            if (eventData.detail || eventData.message) {
+                const detailDiv = document.createElement('div');
+                detailDiv.className = 'event-detail';
+                detailDiv.textContent = eventData.detail || eventData.message;
+                eventDiv.appendChild(detailDiv);
+            }
+
+            if (eventData.result) {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'event-detail';
+                resultDiv.innerHTML = `<strong>Result:</strong><br>${eventData.result}`;
+                eventDiv.appendChild(resultDiv);
+            }
+
+            if (eventData.cached) {
+                const cachedBadge = document.createElement('span');
+                cachedBadge.className = 'event-cached';
+                cachedBadge.textContent = 'CACHED';
+                eventDiv.appendChild(cachedBadge);
+            }
+
+            if (eventData.cache_stats) {
+                const statsDiv = document.createElement('div');
+                statsDiv.className = 'cache-stats';
+                
+                const statsTitle = document.createElement('h4');
+                statsTitle.textContent = '📊 Cache Statistics';
+                statsDiv.appendChild(statsTitle);
+
+                const statsGrid = document.createElement('div');
+                statsGrid.className = 'cache-stats-grid';
+
+                const stats = eventData.cache_stats;
+                const statItems = [
+                    { label: 'Entries', value: stats.size },
+                    { label: 'Hits', value: stats.hits },
+                    { label: 'Misses', value: stats.misses },
+                    { label: 'Hit Rate', value: (stats.hit_rate * 100).toFixed(1) + '%' }
+                ];
+
+                statItems.forEach(item => {
+                    const statDiv = document.createElement('div');
+                    statDiv.className = 'cache-stat-item';
+                    statDiv.innerHTML = `
+                        <div class="cache-stat-label">${item.label}</div>
+                        <div class="cache-stat-value">${item.value}</div>
+                    `;
+                    statsGrid.appendChild(statDiv);
+                });
+
+                statsDiv.appendChild(statsGrid);
+                eventDiv.appendChild(statsDiv);
+            }
+
+            if (eventData.error) {
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'event-detail';
+                errorDiv.innerHTML = `<strong style="color: #f44336;">Error:</strong><br>${eventData.error}`;
+                eventDiv.appendChild(errorDiv);
+            }
+
+            eventsContainer.appendChild(eventDiv);
+            eventsContainer.scrollTop = eventsContainer.scrollHeight;
+        }
+
+        async function startExecution() {
+            const query = queryInput.value.trim();
+            if (!query) {
+                alert('Please enter a query');
+                return;
+            }
+
+            startBtn.disabled = true;
+            setStatus('streaming');
+
+            try {
+                // Use fetch with ReadableStream for SSE
+                const response = await fetch('/api/stream', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        use_cache: useCacheCheckbox.checked
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                console.log('Starting to read stream...');
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        console.log('Stream ended');
+                        break;
+                    }
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    console.log('Received chunk:', chunk);
+                    buffer += chunk;
+                    
+                    // Process complete lines
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // Keep incomplete line in buffer
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.slice(6);
+                            console.log('Processing SSE data:', data);
+                            try {
+                                const eventData = JSON.parse(data);
+                                console.log('Parsed event:', eventData);
+                                addEvent(eventData);
+                            } catch (e) {
+                                console.error('Failed to parse event data:', e, 'Raw data:', data);
+                            }
+                        }
+                    }
+                }
+
+                setStatus('idle');
+            } catch (error) {
+                console.error('Stream error:', error);
+                addEvent({
+                    event_type: 'error',
+                    error: error.message,
+                    timestamp: new Date().toLocaleTimeString()
+                });
+                setStatus('error');
+            } finally {
+                startBtn.disabled = false;
+            }
+        }
+
+        function clearEvents() {
+            eventsContainer.innerHTML = `
+                <div class="empty-state">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <p>No events yet. Click "Start Execution" to begin.</p>
+                </div>
+            `;
+            setStatus('idle');
+        }
+
+        startBtn.addEventListener('click', startExecution);
+        clearBtn.addEventListener('click', clearEvents);
+
+        // Allow Enter key to submit (with Ctrl/Cmd)
+        queryInput.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                startExecution();
+            }
+        });
+    </script>
+</body>
+</html>

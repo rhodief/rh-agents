@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple SSE Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        #output { 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            height: 500px; 
+            overflow-y: auto; 
+            background: #f5f5f5;
+        }
+        .event { 
+            border-bottom: 1px solid #ddd; 
+            padding: 5px; 
+            margin: 5px 0;
+        }
+        button { padding: 10px 20px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>SSE Streaming Test</h1>
+    <button onclick="startStream()">Start Stream</button>
+    <button onclick="clearOutput()">Clear</button>
+    <div id="output"></div>
+
+    <script>
+        const output = document.getElementById('output');
+        
+        function log(message) {
+            const div = document.createElement('div');
+            div.className = 'event';
+            div.textContent = new Date().toLocaleTimeString() + ': ' + message;
+            output.appendChild(div);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function clearOutput() {
+            output.innerHTML = '';
+        }
+
+        async function startStream() {
+            log('Starting stream...');
+            
+            try {
+                const response = await fetch('/api/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: 'Liste as peças do tipo DEC_ADM',
+                        use_cache: false
+                    })
+                });
+
+                log('Response received, status: ' + response.status);
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let eventCount = 0;
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    
+                    if (done) {
+                        log('Stream complete! Total events: ' + eventCount);
+                        break;
+                    }
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    log('Chunk received (' + chunk.length + ' bytes)');
+                    buffer += chunk;
+                    
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            eventCount++;
+                            const data = line.slice(6);
+                            try {
+                                const event = JSON.parse(data);
+                                log('EVENT #' + eventCount + ': ' + event.event_type + ' - ' + (event.detail || event.message || ''));
+                            } catch (e) {
+                                log('Parse error: ' + e.message);
+                            }
+                        } else if (line.trim() && !line.startsWith(':')) {
+                            log('Other line: ' + line);
+                        }
+                    }
+                }
+            } catch (error) {
+                log('ERROR: ' + error.message);
+                console.error(error);
+            }
+        }
+    </script>
+</body>
+</html>

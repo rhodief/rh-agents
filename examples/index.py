@@ -73,7 +73,7 @@ if __name__ == "__main__":
     agent_execution_state = ExecutionState(event_bus=bus)
     
     async def streamer():
-        async for event in bus.event_stream():
+        async for event in bus.stream():
             pass  # Events already printed by subscriber
     
     omni_agent = OmniAgent(

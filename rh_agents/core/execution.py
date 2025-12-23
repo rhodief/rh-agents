@@ -1,8 +1,13 @@
 from __future__ import annotations
-from typing import Any, Callable, Union, Optional
+import asyncio
+from collections.abc import AsyncGenerator
+from typing import Any, Callable, Union, Optional, Awaitable, AsyncGenerator
 from pydantic import BaseModel, Field, field_serializer
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from rh_agents.core.events import ExecutionEvent
 from rh_agents.core.types import EventType, ExecutionStatus
-
+import inspect
 
 class ExecutionStore(BaseModel):
     data: dict[str, str] = Field(default_factory=dict)
@@ -59,22 +64,37 @@ class HistorySet(BaseModel):
 
 class EventBus(BaseModel):
     subscribers: list[Callable] = Field(default_factory=list)
-    events: list[Any] = Field(default_factory=list)  # Use Any instead of ExecutionEvent
+    events: list[Any] = Field(default_factory=list)
+    queue: asyncio.Queue = Field(default_factory=asyncio.Queue)
+
+    class Config:
+        arbitrary_types_allowed = True
 
     def subscribe(self, handler: Callable):
-        """Subscribe a handler to all events."""
         self.subscribers.append(handler)
 
-    def publish(self, event: Any):
-        """Publish event to all subscribers and store in event log."""
+    async def publish(self, event: ExecutionEvent):
         self.events.append(event)
-        for handler in self.subscribers:
-            handler(event)
 
-    async def event_stream(self):
-        """Async generator for all published events."""
-        for event in self.events:
+        for handler in self.subscribers:
+            event_copy = (
+                event.model_copy()
+                if hasattr(event, "model_copy")
+                else event
+            )
+
+            result = handler(event_copy)
+            if asyncio.iscoroutine(result):
+                await result
+        
+        # Yield control to allow other tasks (like stream generators) to process the event
+        await asyncio.sleep(0)
+
+    async def stream(self) -> AsyncGenerator[Any, None]:
+        while True:
+            event = await self.queue.get()
             yield event
+
 
 
 class ExecutionState(BaseModel):
@@ -117,12 +137,12 @@ class ExecutionState(BaseModel):
             return self.execution_stack.pop()
         return None
     
-    def add_event(self, event: Any, status: ExecutionStatus):
+    async def add_event(self, event: Any, status: ExecutionStatus):
         """Add event to history and publish to event bus"""
         event.address = self.get_current_address(event.actor.event_type)
         event.execution_status = status
         self.history.add(event)
-        self.event_bus.publish(event)
+        await self.event_bus.publish(event)
         
     def add_step_result(self, step_index: int, value: Any):
         """Store step result in execution storage with key 'step_{index}'"""

@@ -1,3 +1,27 @@
+"""DEPRECATED: This cache_backends module is deprecated.
+
+Please use rh_agents.state_backends instead.
+
+The new state recovery system provides superior functionality:
+- Full execution state persistence (not just results)
+- Smart replay with event skipping
+- Selective replay via resume_from_address
+- Artifact storage with content-addressable IDs
+- State diffing and comparison
+- Metadata tagging and querying
+
+See docs/STATE_RECOVERY_SPEC.md for migration guide.
+"""
+
+import warnings
+
+warnings.warn(
+    "rh_agents.cache_backends is deprecated. Use rh_agents.state_backends instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
+# Original implementation preserved for backward compatibility:
 """
 Cache backend implementations for execution result caching.
 """

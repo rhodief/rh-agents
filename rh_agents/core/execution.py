@@ -154,27 +154,15 @@ class ExecutionState(BaseModel):
     
     def __init__(
         self, 
-        cache_backend: Optional[Any] = None,
         state_backend: Optional["StateBackend"] = None,
         artifact_backend: Optional["ArtifactBackend"] = None,
         **data
     ):
-        """Initialize ExecutionState with optional backends."""
+        """Initialize ExecutionState with backends."""
         super().__init__(**data)
         # Store backends as instance attributes (not Pydantic fields)
-        self._cache_backend = cache_backend  # DEPRECATED
         self._state_backend = state_backend
         self._artifact_backend = artifact_backend
-    
-    @property
-    def cache_backend(self) -> Optional[Any]:
-        """Get the cache backend instance. DEPRECATED: Use state recovery instead."""
-        return getattr(self, '_cache_backend', None)
-    
-    @cache_backend.setter
-    def cache_backend(self, value: Optional[Any]):
-        """Set the cache backend instance. DEPRECATED: Use state recovery instead."""
-        self._cache_backend = value
     
     @property
     def state_backend(self) -> Optional["StateBackend"]:

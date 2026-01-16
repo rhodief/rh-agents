@@ -207,12 +207,72 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     
     async def __call__(self, input_data, extra_context, execution_state: ExecutionState) -> ExecutionResult[OutputT]:
         """
-        Execute the wrapped actor with full lifecycle management and caching support (async only).
+        Execute the wrapped actor with replay awareness and state recovery support.
+        
+        Flow:
+        1. Check if this event should be skipped during replay (already executed)
+        2. If skipped, return cached result from history
+        3. Otherwise, execute normally and store result for future replay
         """
         execution_state.push_context(f'{self.actor.name}{"::" + self.tag if self.tag else ""}')
         
         try:
-            # Try to retrieve from cache
+            current_address = execution_state.get_current_address(self.actor.event_type)
+            
+            # PHASE 2: REPLAY LOGIC
+            # Check if we should skip this event (already executed in restored state)
+            if execution_state.should_skip_event(current_address):
+                # Event already executed - retrieve result from history
+                existing_event = execution_state.history[current_address]
+                
+                # Mark as replayed
+                self.is_replayed = True
+                self.from_cache = True  # Keep for backward compatibility
+                self.execution_time = 0.0
+                
+                # Decide whether to republish based on replay mode
+                from rh_agents.core.state_recovery import ReplayMode
+                if execution_state.replay_mode == ReplayMode.REPUBLISH_ALL:
+                    self.skip_republish = False
+                else:
+                    self.skip_republish = True  # Don't republish old events
+                
+                # Copy event details from history (handle both dict and object)
+                if isinstance(existing_event, dict):
+                    self.detail = f"[REPLAYED] {existing_event.get('detail', '')}"
+                    stored_result = existing_event.get('result')
+                else:
+                    self.detail = f"[REPLAYED] {existing_event.detail if hasattr(existing_event, 'detail') else ''}"
+                    stored_result = getattr(existing_event, 'result', None)
+                
+                self.message = "Recovered from restored state"
+                
+                # Publish recovery event if needed
+                await execution_state.add_event(self, ExecutionStatus.RECOVERED)
+                
+                # Return the stored result
+                if stored_result is not None:
+                    # If it's a dict (from deserialization), try to reconstruct the model
+                    if isinstance(stored_result, dict):
+                        # Try to reconstruct as the output model if available
+                        if self.actor.output_model:
+                            try:
+                                stored_result = self.actor.output_model.model_validate(stored_result)
+                            except Exception:
+                                # If reconstruction fails, use dict as-is
+                                pass
+                    
+                    return ExecutionResult[OutputT](
+                        result=stored_result,
+                        execution_time=0.0,
+                        ok=True
+                    )
+                else:
+                    # If no result found, log warning but continue to re-execute
+                    print(f"Warning: No result found for replayed event at {current_address}, re-executing...")
+            
+            # NOT IN REPLAY MODE or EVENT NOT FOUND or VALIDATION MODE
+            # Check old cache system first (backward compatibility during Phase 3 transition)
             cached_result = await self.__try_retrieve_from_cache(input_data, execution_state)
             if cached_result is not None:
                 return cached_result
@@ -236,6 +296,10 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # Stop timer and mark as completed with result details
             self.stop_timer()
             self.detail = self._serialize_detail(result)
+            
+            # PHASE 2: Store result in event for replay
+            self.result = result
+            
             await execution_state.add_event(self, ExecutionStatus.COMPLETED)
             
             execution_result = ExecutionResult[OutputT](
@@ -244,7 +308,19 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
                 ok=True
             )
             
-            # Store result in cache
+            # VALIDATION MODE: Compare with historical result if it exists
+            from rh_agents.core.state_recovery import ReplayMode
+            if execution_state.replay_mode == ReplayMode.VALIDATION:
+                if current_address in execution_state.history._HistorySet__events:
+                    historical_event = execution_state.history[current_address]
+                    if hasattr(historical_event, 'result') and historical_event.result is not None:
+                        # Simple comparison - can be enhanced
+                        if historical_event.result != result:
+                            print(f"WARNING: Validation mismatch at {current_address}")
+                            print(f"  Historical: {historical_event.result}")
+                            print(f"  Current: {result}")
+            
+            # Store result in cache (backward compatibility during Phase 3 transition)
             self.__store_result_in_cache(input_data, execution_result, execution_state)
             
             return execution_result

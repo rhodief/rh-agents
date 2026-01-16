@@ -29,6 +29,11 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     max_detail_length: int = Field(default=500, description="Maximum length of detail string")
     from_cache: bool = Field(default=False, description="Whether the result was recovered from cache")
     
+    # State recovery fields
+    result: Union[Any, None] = Field(default=None, description="Actual result of the execution (for replay)")
+    is_replayed: bool = Field(default=False, description="True if event was recovered from restored state")
+    skip_republish: bool = Field(default=False, description="If True, skip publishing to event bus (replay control)")
+    
     @field_serializer('actor')
     def serialize_actor(self, actor: BaseActor) -> dict:
         """Serialize actor to a JSON-safe dict with only relevant fields."""
@@ -36,6 +41,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             "name": actor.name,
             "event_type": actor.event_type.value,
         }
+    
     
     def start_timer(self):
         self._start_time = time()

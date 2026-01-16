@@ -1,10 +1,13 @@
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Beautiful Event Printer
+# Beautiful Event Printer & SSE Streamer
 # ═══════════════════════════════════════════════════════════════════════════════
 
+import asyncio
+import json
 from collections.abc import Callable
+from typing import AsyncGenerator, Optional, Any
 from rh_agents.core.events import ExecutionEvent
 from rh_agents.core.types import EventType, ExecutionStatus
 
@@ -243,3 +246,119 @@ def create_event_handler(printer: EventPrinter | None = None) -> Callable:
     if printer is None:
         printer = EventPrinter()
     return printer
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SSE Event Streamer (for FastAPI streaming)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EventStreamer:
+    """
+    Wrapper for Server-Sent Events (SSE) streaming of execution events.
+    
+    Usage is just like EventPrinter - simply plug it into the event bus:
+    
+    ```python
+    streamer = EventStreamer()
+    bus = EventBus()
+    bus.subscribe(streamer)
+    
+    # Then use streamer.stream() for FastAPI response:
+    return StreamingResponse(streamer.stream(), media_type="text/event-stream")
+    ```
+    """
+    
+    def __init__(
+        self, 
+        include_cache_stats: bool = True,
+        heartbeat_interval: float = 0.25
+    ):
+        """
+        Initialize the SSE event streamer.
+        
+        Args:
+            include_cache_stats: Whether to include cache statistics in completion event
+            heartbeat_interval: Interval in seconds for keep-alive heartbeats
+        """
+        self.queue: asyncio.Queue[ExecutionEvent] = asyncio.Queue()
+        self.include_cache_stats = include_cache_stats
+        self.heartbeat_interval = heartbeat_interval
+        self._execution_task: Optional[asyncio.Task] = None
+        self._completed = False
+    
+    async def __call__(self, event: ExecutionEvent):
+        """Handle incoming events - called by EventBus subscriber."""
+        await self.queue.put(event)
+    
+    def set_execution_task(self, task: asyncio.Task):
+        """Set the execution task to monitor for completion."""
+        self._execution_task = task
+    
+    async def stream(
+        self, 
+        execution_task: Optional[asyncio.Task] = None,
+        cache_backend: Optional[Any] = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generate SSE-formatted event stream for FastAPI.
+        
+        Args:
+            execution_task: Optional task to monitor for completion
+            cache_backend: Optional cache backend to get stats from
+            
+        Yields:
+            SSE-formatted event strings (data: {...})
+        """
+        if execution_task:
+            self._execution_task = execution_task
+        
+        # Start stream with connection message
+        yield ": stream-start\n\n"
+        
+        try:
+            while True:
+                # Check if execution completed and queue is empty
+                if self._execution_task and self._execution_task.done() and self.queue.empty():
+                    break
+                
+                try:
+                    # Wait for next event with timeout for heartbeat
+                    event = await asyncio.wait_for(
+                        self.queue.get(),
+                        timeout=self.heartbeat_interval
+                    )
+                    
+                    # Send event as SSE data
+                    yield f"data: {event.model_dump_json()}\n\n"
+                    
+                except asyncio.TimeoutError:
+                    # Send heartbeat to keep connection alive
+                    yield ": keep-alive\n\n"
+            
+            # Check for execution errors
+            if self._execution_task:
+                await self._execution_task
+            
+            # Send completion event
+            final_event = {
+                "event_type": "complete",
+                "message": "Execution completed successfully"
+            }
+            
+            # Add cache statistics if available
+            if self.include_cache_stats and cache_backend:
+                if hasattr(cache_backend, 'get_stats'):
+                    final_event["cache_stats"] = cache_backend.get_stats()
+            
+            yield f"data: {json.dumps(final_event)}\n\n"
+            
+        except Exception as e:
+            # Send error event
+            error_event = {
+                "event_type": "error",
+                "message": str(e)
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+        
+        finally:
+            self._completed = True

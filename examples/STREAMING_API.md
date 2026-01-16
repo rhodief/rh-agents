@@ -2,6 +2,21 @@
 
 A FastAPI application that streams agent execution events in real-time using Server-Sent Events (SSE).
 
+## 🎯 New in This Version: EventStreamer
+
+This example now uses the new `EventStreamer` class that dramatically simplifies SSE streaming!
+
+**Instead of 60+ lines of boilerplate**, you now need just **4 lines**:
+
+```python
+streamer = EventStreamer(include_cache_stats=True)
+bus.subscribe(streamer)
+execution_task = asyncio.create_task(...)
+return StreamingResponse(streamer.stream(execution_task, cache_backend))
+```
+
+👉 See [STREAMING_SIMPLE.md](./STREAMING_SIMPLE.md) for a detailed before/after comparison.
+
 ## Features
 
 - 🚀 Real-time event streaming over HTTP

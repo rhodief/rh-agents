@@ -129,7 +129,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
                                 pass
                     
                     return ExecutionResult[OutputT](
-                        result=stored_result,
+                        result=stored_result,  # type: ignore[arg-type]
                         execution_time=0.0,
                         ok=True
                     )
@@ -161,6 +161,13 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # PHASE 2: Store result in event for replay
             self.result = result
             
+            # Store result as artifact if actor produces artifacts
+            if self.actor.is_artifact and execution_state.artifact_backend is not None:
+                from rh_agents.state_backends import compute_artifact_id
+                artifact_id = compute_artifact_id(result)
+                execution_state.storage.set_artifact(artifact_id, result)
+                execution_state.artifact_backend.save_artifact(artifact_id, result)
+            
             await execution_state.add_event(self, ExecutionStatus.COMPLETED)
             
             execution_result = ExecutionResult[OutputT](
@@ -172,7 +179,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # VALIDATION MODE: Compare with historical result if it exists
             from rh_agents.core.state_recovery import ReplayMode
             if execution_state.replay_mode == ReplayMode.VALIDATION:
-                if current_address in execution_state.history._HistorySet__events:
+                if execution_state.history.has_completed_event(current_address):
                     historical_event = execution_state.history[current_address]
                     if hasattr(historical_event, 'result') and historical_event.result is not None:
                         # Simple comparison - can be enhanced

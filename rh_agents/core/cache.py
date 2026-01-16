@@ -1,3 +1,4 @@
+from __future__ import annotations
 """DEPRECATED: This cache module is deprecated in favor of the state recovery system.
 
 Please use rh_agents.core.state_recovery and rh_agents.state_backends instead.
@@ -38,7 +39,6 @@ Cache abstraction for execution result caching and recovery.
 This module contains the abstract base class and core utilities.
 Concrete implementations are in rh_agents.cache_backends module.
 """
-from __future__ import annotations
 import hashlib
 import json
 from abc import ABC, abstractmethod

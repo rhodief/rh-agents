@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rh_agents.core.events import ExecutionEvent
     from rh_agents.core.state_backend import StateBackend, ArtifactBackend
+    from rh_agents.core.state_recovery import StateSnapshot, StateStatus, StateMetadata
 from rh_agents.core.types import EventType, ExecutionStatus
 from rh_agents.core.state_recovery import ReplayMode
 import inspect
@@ -263,12 +264,27 @@ class ExecutionState(BaseModel):
         if self.resume_from_address:
             # Check if we've reached the resume point
             if address == self.resume_from_address:
-                # Clear resume_from_address and mark that we've reached it
-                self.resume_from_address = None
+                # Mark that we've reached it and DON'T skip this event
                 self._resume_point_reached = True
-                return False  # Execute this event
+                return False  # Execute this event (and continue executing after)
+            
+            # Check if current address is a PREFIX of the resume address
+            # This means we need to execute this parent event to reach the nested resume point
+            # Remove trailing ::xxx from address and check if resume starts with it
+            addr_base = address.rsplit("::", 1)[0] if "::" in address else address
+            if self.resume_from_address.startswith(addr_base + "::"):
+                return False  # Don't skip - need to execute to reach nested resume point
+            
+            # Also check exact prefix match (for addresses without :: at the end)
+            if self.resume_from_address.startswith(address + "::"):
+                return False
+            
             # Skip if we haven't reached resume point yet AND event exists in history
             return self.history.has_completed_event(address)
+        
+        # If we've reached the resume point, don't skip anymore (force re-execution)
+        if self._resume_point_reached:
+            return False
         
         # Normal replay: skip if already completed
         return self.history.has_completed_event(address)

@@ -1,12 +1,16 @@
 from __future__ import annotations
 import asyncio
+import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Callable, Union, Optional, Awaitable, AsyncGenerator
 from pydantic import BaseModel, Field, field_serializer
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rh_agents.core.events import ExecutionEvent
+    from rh_agents.core.state_backend import StateBackend, ArtifactBackend
+    from rh_agents.core.state_recovery import StateSnapshot, StateStatus, StateMetadata
 from rh_agents.core.types import EventType, ExecutionStatus
+from rh_agents.core.state_recovery import ReplayMode
 import inspect
 
 class ExecutionStore(BaseModel):
@@ -40,7 +44,17 @@ class HistorySet(BaseModel):
         if events is None:
             events = []
         super().__init__(events=events, **data)
-        self.__events = {event.address: event for event in self.events}
+        # Handle both ExecutionEvent objects and dicts (from deserialization)
+        self.__events = {}
+        for event in self.events:
+            if isinstance(event, dict):
+                # Store dict as-is, use 'address' key
+                address = event.get('address', '')
+                if address:
+                    self.__events[address] = event
+            else:
+                # It's an ExecutionEvent object
+                self.__events[event.address] = event
 
     def __iter__(self):
         for address, event in self.__events.items():
@@ -60,6 +74,30 @@ class HistorySet(BaseModel):
     def add(self, event: Any):
         """Add event to history, keeping all events while updating latest lookup"""
         self.__setitem__(event.address, event)
+    
+    def get_event_result(self, address: str) -> Optional[Any]:
+        """Get the result from a completed event at given address."""
+        if address in self.__events:
+            event = self.__events[address]
+            # Handle both dict and ExecutionEvent objects
+            if isinstance(event, dict):
+                if event.get('execution_status') == ExecutionStatus.COMPLETED.value:
+                    return event.get('result')
+            else:
+                if hasattr(event, 'execution_status') and event.execution_status == ExecutionStatus.COMPLETED:
+                    return getattr(event, 'result', None)
+        return None
+    
+    def has_completed_event(self, address: str) -> bool:
+        """Check if event at address completed successfully."""
+        if address not in self.__events:
+            return False
+        event = self.__events[address]
+        # Handle both dict and ExecutionEvent objects
+        if isinstance(event, dict):
+            return event.get('execution_status') == ExecutionStatus.COMPLETED.value
+        else:
+            return hasattr(event, 'execution_status') and event.execution_status == ExecutionStatus.COMPLETED
 
 
 class EventBus(BaseModel):
@@ -98,27 +136,54 @@ class EventBus(BaseModel):
 
 
 class ExecutionState(BaseModel):
+    model_config = {"arbitrary_types_allowed": True}
+    
+    # State recovery fields
+    state_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for this execution state")
+    replay_mode: ReplayMode = Field(default=ReplayMode.NORMAL, description="How to handle replay of already-executed events")
+    resume_from_address: Optional[str] = Field(default=None, description="Address to resume execution from (replay all events after this)")
+    _resume_point_reached: bool = False  # Internal flag: True after resume_from_address is cleared
+    
+    # Core state components
     storage: ExecutionStore = Field(default_factory=lambda: ExecutionStore())
     current_execution: Union[Any, None] = None  # Use Any instead of ExecutionEvent
     history: HistorySet = Field(default_factory=HistorySet)
-    event_bus: EventBus = Field(default_factory=EventBus)    
     execution_stack: list[str] = Field(default_factory=list, description="Stack tracking current execution path (agent/tool names)")
-    _cache_backend: Optional[Any] = None  # Private field to avoid serialization issues
+    
+    # Runtime components (not serialized, stored as plain attributes)
+    event_bus: EventBus = Field(default_factory=EventBus, exclude=True)
+    
+    def __init__(
+        self, 
+        state_backend: Optional["StateBackend"] = None,
+        artifact_backend: Optional["ArtifactBackend"] = None,
+        **data
+    ):
+        """Initialize ExecutionState with backends."""
+        super().__init__(**data)
+        # Store backends as instance attributes (not Pydantic fields)
+        self._state_backend = state_backend
+        self._artifact_backend = artifact_backend
     
     @property
-    def cache_backend(self) -> Optional[Any]:
-        """Get the cache backend instance."""
-        return self._cache_backend
+    def state_backend(self) -> Optional["StateBackend"]:
+        """Get the state backend instance."""
+        return getattr(self, '_state_backend', None)
     
-    @cache_backend.setter
-    def cache_backend(self, value: Optional[Any]):
-        """Set the cache backend instance."""
-        self._cache_backend = value
+    @state_backend.setter
+    def state_backend(self, value: Optional["StateBackend"]):
+        """Set the state backend instance."""
+        self._state_backend = value
     
-    def __init__(self, cache_backend: Optional[Any] = None, **data):
-        """Initialize ExecutionState with optional cache backend."""
-        super().__init__(**data)
-        self._cache_backend = cache_backend
+    @property
+    def artifact_backend(self) -> Optional["ArtifactBackend"]:
+        """Get the artifact backend instance."""
+        return getattr(self, '_artifact_backend', None)
+    
+    @artifact_backend.setter
+    def artifact_backend(self, value: Optional["ArtifactBackend"]):
+        """Set the artifact backend instance."""
+        self._artifact_backend = value
     
     
     def get_current_address(self, event_type: EventType) -> str:
@@ -138,11 +203,14 @@ class ExecutionState(BaseModel):
         return None
     
     async def add_event(self, event: Any, status: ExecutionStatus):
-        """Add event to history and publish to event bus"""
+        """Add event to history and conditionally publish to event bus."""
         event.address = self.get_current_address(event.actor.event_type)
         event.execution_status = status
         self.history.add(event)
-        await self.event_bus.publish(event)
+        
+        # Only publish if not skipped (for replay control)
+        if not getattr(event, 'skip_republish', False):
+            await self.event_bus.publish(event)
         
     def add_step_result(self, step_index: int, value: Any):
         """Store step result in execution storage with key 'step_{index}'"""
@@ -168,4 +236,220 @@ class ExecutionState(BaseModel):
     def get_all_steps_results(self) -> dict[str, str]:
         """Retrieve all stored execution results"""
         return self.storage.data.copy()
+    
+    def should_skip_event(self, address: str) -> bool:
+        """
+        Check if event should be skipped during replay.
+        
+        Logic:
+        - VALIDATION mode: Never skip (re-execute everything)
+        - With resume_from_address: Skip until we reach that address, then never skip again
+        - After resume point reached: Never skip (creating new timeline)
+        - Normal replay: Skip if event completed successfully in history
+        
+        Args:
+            address: Event address to check
+            
+        Returns:
+            True if event should be skipped, False if it should execute
+        """
+        if self.replay_mode == ReplayMode.VALIDATION:
+            return False  # Always execute for validation
+        
+        # If resume point was already reached, don't skip anything (new timeline)
+        if self._resume_point_reached:
+            return False
+        
+        # If resume_from_address is set, skip everything before it
+        if self.resume_from_address:
+            # Check if we've reached the resume point
+            if address == self.resume_from_address:
+                # Mark that we've reached it and DON'T skip this event
+                self._resume_point_reached = True
+                return False  # Execute this event (and continue executing after)
+            
+            # Check if current address is a PREFIX of the resume address
+            # This means we need to execute this parent event to reach the nested resume point
+            # Remove trailing ::xxx from address and check if resume starts with it
+            addr_base = address.rsplit("::", 1)[0] if "::" in address else address
+            if self.resume_from_address.startswith(addr_base + "::"):
+                return False  # Don't skip - need to execute to reach nested resume point
+            
+            # Also check exact prefix match (for addresses without :: at the end)
+            if self.resume_from_address.startswith(address + "::"):
+                return False
+            
+            # Skip if we haven't reached resume point yet AND event exists in history
+            return self.history.has_completed_event(address)
+        
+        # If we've reached the resume point, don't skip anymore (force re-execution)
+        if self._resume_point_reached:
+            return False
+        
+        # Normal replay: skip if already completed
+        return self.history.has_completed_event(address)
+    
+    def to_snapshot(
+        self,
+        status: Optional["StateStatus"] = None,
+        metadata: Optional["StateMetadata"] = None
+    ) -> "StateSnapshot":
+        """
+        Create a snapshot of current execution state for persistence.
+        
+        This includes:
+        - Core state (history, storage, stack)
+        - Artifact references (artifacts stored separately)
+        - Metadata and timestamps
+        
+        Runtime components (event_bus, backends) are excluded.
+        
+        Args:
+            status: Execution status (default: RUNNING)
+            metadata: Optional metadata to attach
+            
+        Returns:
+            StateSnapshot ready for persistence
+        """
+        from datetime import datetime
+        from rh_agents.core.state_recovery import StateSnapshot, StateStatus, StateMetadata
+        from rh_agents.state_backends import compute_artifact_id
+        
+        # Serialize core state (exclude runtime components)
+        state_dict = self.model_dump(
+            exclude={'event_bus'}
+        )
+        
+        # Extract artifact references and save artifacts separately
+        artifact_refs = {}
+        for key, artifact in self.storage.artifacts.items():
+            artifact_id = compute_artifact_id(artifact)
+            artifact_refs[key] = artifact_id
+            
+            # Save artifact to backend if available
+            if self.artifact_backend:
+                self.artifact_backend.save_artifact(artifact_id, artifact)
+        
+        # Create snapshot
+        return StateSnapshot(
+            state_id=self.state_id,
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+            status=status or StateStatus.RUNNING,
+            metadata=metadata or StateMetadata(),
+            execution_state=state_dict,
+            artifact_refs=artifact_refs
+        )
+    
+    @classmethod
+    def from_snapshot(
+        cls,
+        snapshot: "StateSnapshot",
+        state_backend: Optional["StateBackend"] = None,
+        artifact_backend: Optional["ArtifactBackend"] = None,
+        event_bus: Optional[EventBus] = None,
+        replay_mode: ReplayMode = ReplayMode.NORMAL,
+        resume_from_address: Optional[str] = None
+    ) -> "ExecutionState":
+        """
+        Restore ExecutionState from a snapshot.
+        
+        Reconstructs:
+        - Core state from serialized data
+        - Artifacts from artifact backend
+        - Runtime components (event bus, backends)
+        
+        Note: Events in history are kept as dicts (not fully reconstructed)
+        since we only need result/status data for replay, not the actor/handler.
+        
+        Args:
+            snapshot: StateSnapshot to restore from
+            state_backend: Backend for state persistence
+            artifact_backend: Backend for artifact storage
+            event_bus: Event bus instance (creates new if None)
+            replay_mode: How to handle replay
+            resume_from_address: Optional address to resume from
+            
+        Returns:
+            Restored ExecutionState ready for execution
+        """
+        # Deserialize core state - events will be dicts, not ExecutionEvent objects
+        # This is fine because HistorySet now handles both
+        state = cls(**snapshot.execution_state)
+        
+        # Restore artifacts from backend
+        if artifact_backend:
+            for key, artifact_id in snapshot.artifact_refs.items():
+                artifact = artifact_backend.load_artifact(artifact_id)
+                if artifact:
+                    state.storage.artifacts[key] = artifact
+        
+        # Reconstruct runtime components
+        state.event_bus = event_bus or EventBus()
+        state._state_backend = state_backend
+        state._artifact_backend = artifact_backend
+        state.replay_mode = replay_mode
+        state.resume_from_address = resume_from_address
+        
+        return state
+    
+    def save_checkpoint(
+        self,
+        status: Optional["StateStatus"] = None,
+        metadata: Optional["StateMetadata"] = None
+    ) -> bool:
+        """
+        Save current state to backend as a checkpoint.
+        
+        Args:
+            status: Execution status (default: RUNNING)
+            metadata: Optional metadata to attach
+            
+        Returns:
+            True if successful, False if no backend configured or save failed
+        """
+        if not self.state_backend:
+            return False
+        
+        snapshot = self.to_snapshot(status, metadata)
+        return self.state_backend.save_state(snapshot)
+    
+    @classmethod
+    def load_from_state_id(
+        cls,
+        state_id: str,
+        state_backend: "StateBackend",
+        artifact_backend: Optional["ArtifactBackend"] = None,
+        event_bus: Optional[EventBus] = None,
+        replay_mode: ReplayMode = ReplayMode.NORMAL,
+        resume_from_address: Optional[str] = None
+    ) -> Optional["ExecutionState"]:
+        """
+        Load ExecutionState by its unique ID.
+        
+        Convenience method that loads snapshot and restores state.
+        
+        Args:
+            state_id: Unique state identifier
+            state_backend: Backend to load from
+            artifact_backend: Backend for artifact loading
+            event_bus: Event bus instance (creates new if None)
+            replay_mode: How to handle replay
+            resume_from_address: Optional address to resume from
+            
+        Returns:
+            Restored ExecutionState if found, None otherwise
+        """
+        snapshot = state_backend.load_state(state_id)
+        if not snapshot:
+            return None
+        
+        return cls.from_snapshot(
+            snapshot,
+            state_backend,
+            artifact_backend,
+            event_bus,
+            replay_mode,
+            resume_from_address
+        )
     

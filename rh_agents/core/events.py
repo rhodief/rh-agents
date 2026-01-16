@@ -29,6 +29,11 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     max_detail_length: int = Field(default=500, description="Maximum length of detail string")
     from_cache: bool = Field(default=False, description="Whether the result was recovered from cache")
     
+    # State recovery fields
+    result: Union[Any, None] = Field(default=None, description="Actual result of the execution (for replay)")
+    is_replayed: bool = Field(default=False, description="True if event was recovered from restored state")
+    skip_republish: bool = Field(default=False, description="If True, skip publishing to event bus (replay control)")
+    
     @field_serializer('actor')
     def serialize_actor(self, actor: BaseActor) -> dict:
         """Serialize actor to a JSON-safe dict with only relevant fields."""
@@ -36,6 +41,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             "name": actor.name,
             "event_type": actor.event_type.value,
         }
+    
     
     def start_timer(self):
         self._start_time = time()
@@ -63,154 +69,75 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
         except Exception:
             return str(data)[:self.max_detail_length]
     
-    async def __try_retrieve_from_cache(self, input_data: Any, execution_state: ExecutionState) -> Union[ExecutionResult[OutputT], None]:
-        """
-        Attempt to retrieve cached result if caching is enabled.
-        For artifacts, checks ExecutionState storage first, then cache backend.
-        Returns cached ExecutionResult if found, None otherwise.
-        """
-        if not self.actor.cacheable:
-            return None
-        
-        from rh_agents.core.cache import compute_cache_key
-        
-        # Compute cache key based on address, input, actor name and version
-        temp_address = execution_state.get_current_address(self.actor.event_type)
-        cache_key, input_hash = compute_cache_key(
-            temp_address,
-            input_data,
-            self.actor.name,
-            self.actor.version
-        )
-        
-        # For artifacts, check ExecutionState storage first for fast access
-        if self.actor.is_artifact:
-            artifact = execution_state.storage.get_artifact(cache_key)
-            if artifact is not None:
-                # Artifact hit in memory! Prepare for return
-                self.from_cache = True
-                self.execution_time = 0.0
-                self.detail = f"[ARTIFACT:MEMORY] {self._serialize_detail(artifact.result)}"
-                self.message = f"Recovered from artifact storage (in-memory)"
-                await execution_state.add_event(self, ExecutionStatus.RECOVERED)
-                return artifact
-            
-            # Not in memory, check cache backend for persistence
-            if execution_state.cache_backend is not None:
-                cached = execution_state.cache_backend.get(cache_key)
-                if cached is not None:
-                    # Reconstruct the result object using actor's output_model if it's a dict
-                    if isinstance(cached.result.result, dict) and self.actor.output_model is not None:
-                        try:
-                            cached.result.result = self.actor.output_model(**cached.result.result)
-                        except Exception:
-                            pass  # If reconstruction fails, use dict as-is
-                    
-                    # Artifact hit in cache! Store in ExecutionState for future access
-                    execution_state.storage.set_artifact(cache_key, cached.result)
-                    self.from_cache = True
-                    self.execution_time = 0.0
-                    self.detail = f"[ARTIFACT:CACHE] {self._serialize_detail(cached.result.result)}"
-                    self.message = f"Recovered from artifact cache (saved at {cached.cached_at})"
-                    await execution_state.add_event(self, ExecutionStatus.RECOVERED)
-                    return cached.result
-            
-            # Artifact not found in either location
-            return None
-        
-        # For regular actors, try to get from cache backend
-        if execution_state.cache_backend is None:
-            return None
-            
-        cached = execution_state.cache_backend.get(cache_key)
-        if cached is None:
-            return None
-        
-        # Reconstruct the result object using actor's output_model if it's a dict
-        if isinstance(cached.result.result, dict) and self.actor.output_model is not None:
-            try:
-                cached.result.result = self.actor.output_model(**cached.result.result)
-            except Exception:
-                pass  # If reconstruction fails, use dict as-is
-        
-        # Cache hit! Prepare for return
-        self.from_cache = True
-        self.execution_time = 0.0
-        self.detail = f"[CACHED] {self._serialize_detail(cached.result.result)}"
-        self.message = f"Recovered from cache (saved at {cached.cached_at})"
-        await execution_state.add_event(self, ExecutionStatus.RECOVERED)
-        
-        return cached.result
-    
-    def __store_result_in_cache(self, input_data: Any, execution_result: ExecutionResult[OutputT], execution_state: ExecutionState):
-        """
-        Store execution result in cache if caching is enabled.
-        For artifacts, stores in BOTH ExecutionState storage (for fast access) AND cache backend (for persistence).
-        """
-        if not self.actor.cacheable:
-            return
-        
-        from rh_agents.core.cache import CachedResult, compute_cache_key
-        
-        temp_address = execution_state.get_current_address(self.actor.event_type)
-        cache_key, input_hash = compute_cache_key(
-            temp_address,
-            input_data,
-            self.actor.name,
-            self.actor.version
-        )
-        
-        # For artifacts, store in BOTH ExecutionState storage AND cache backend
-        if self.actor.is_artifact:
-            # Store in ExecutionState for fast within-session access
-            execution_state.storage.set_artifact(cache_key, execution_result)
-            
-            # Also store in cache backend for cross-execution persistence
-            if execution_state.cache_backend is not None:
-                cached_result = CachedResult(
-                    result=execution_result,
-                    input_hash=input_hash,
-                    cache_key=cache_key,
-                    actor_name=self.actor.name,
-                    actor_version=self.actor.version
-                )
-                execution_state.cache_backend.set(
-                    cache_key,
-                    cached_result,
-                    ttl=self.actor.cache_ttl
-                )
-            return
-        
-        # For regular results, store in cache backend (requires cache_backend)
-        if execution_state.cache_backend is None:
-            return
-            
-        cached_result = CachedResult(
-            result=execution_result,
-            input_hash=input_hash,
-            cache_key=cache_key,
-            actor_name=self.actor.name,
-            actor_version=self.actor.version
-        )
-        
-        execution_state.cache_backend.set(
-            cache_key,
-            cached_result,
-            ttl=self.actor.cache_ttl
-        )
+
     
     async def __call__(self, input_data, extra_context, execution_state: ExecutionState) -> ExecutionResult[OutputT]:
         """
-        Execute the wrapped actor with full lifecycle management and caching support (async only).
+        Execute the wrapped actor with replay awareness and state recovery support.
+        
+        Flow:
+        1. Check if this event should be skipped during replay (already executed)
+        2. If skipped, return cached result from history
+        3. Otherwise, execute normally and store result for future replay
         """
         execution_state.push_context(f'{self.actor.name}{"::" + self.tag if self.tag else ""}')
         
         try:
-            # Try to retrieve from cache
-            cached_result = await self.__try_retrieve_from_cache(input_data, execution_state)
-            if cached_result is not None:
-                return cached_result
+            current_address = execution_state.get_current_address(self.actor.event_type)
             
+            # PHASE 2: REPLAY LOGIC
+            # Check if we should skip this event (already executed in restored state)
+            if execution_state.should_skip_event(current_address):
+                # Event already executed - retrieve result from history
+                existing_event = execution_state.history[current_address]
+                
+                # Mark as replayed
+                self.is_replayed = True
+                self.from_cache = True  # Keep for backward compatibility
+                self.execution_time = 0.0
+                
+                # Decide whether to republish based on replay mode
+                from rh_agents.core.state_recovery import ReplayMode
+                if execution_state.replay_mode == ReplayMode.REPUBLISH_ALL:
+                    self.skip_republish = False
+                else:
+                    self.skip_republish = True  # Don't republish old events
+                
+                # Copy event details from history (handle both dict and object)
+                if isinstance(existing_event, dict):
+                    self.detail = f"[REPLAYED] {existing_event.get('detail', '')}"
+                    stored_result = existing_event.get('result')
+                else:
+                    self.detail = f"[REPLAYED] {existing_event.detail if hasattr(existing_event, 'detail') else ''}"
+                    stored_result = getattr(existing_event, 'result', None)
+                
+                self.message = "Recovered from restored state"
+                
+                # Publish recovery event if needed
+                await execution_state.add_event(self, ExecutionStatus.RECOVERED)
+                
+                # Return the stored result
+                if stored_result is not None:
+                    # If it's a dict (from deserialization), try to reconstruct the model
+                    if isinstance(stored_result, dict):
+                        # Try to reconstruct as the output model if available
+                        if self.actor.output_model:
+                            try:
+                                stored_result = self.actor.output_model.model_validate(stored_result)
+                            except Exception:
+                                # If reconstruction fails, use dict as-is
+                                pass
+                    
+                    return ExecutionResult[OutputT](
+                        result=stored_result,  # type: ignore[arg-type]
+                        execution_time=0.0,
+                        ok=True
+                    )
+                else:
+                    # If no result found, log warning but continue to re-execute
+                    print(f"Warning: No result found for replayed event at {current_address}, re-executing...")
+            
+            # NOT IN REPLAY MODE or EVENT NOT FOUND or VALIDATION MODE
             # Run preconditions
             await self.actor.run_preconditions(input_data, extra_context, execution_state)
 
@@ -230,6 +157,17 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # Stop timer and mark as completed with result details
             self.stop_timer()
             self.detail = self._serialize_detail(result)
+            
+            # PHASE 2: Store result in event for replay
+            self.result = result
+            
+            # Store result as artifact if actor produces artifacts
+            if self.actor.is_artifact and execution_state.artifact_backend is not None:
+                from rh_agents.state_backends import compute_artifact_id
+                artifact_id = compute_artifact_id(result)
+                execution_state.storage.set_artifact(artifact_id, result)
+                execution_state.artifact_backend.save_artifact(artifact_id, result)
+            
             await execution_state.add_event(self, ExecutionStatus.COMPLETED)
             
             execution_result = ExecutionResult[OutputT](
@@ -238,8 +176,17 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
                 ok=True
             )
             
-            # Store result in cache
-            self.__store_result_in_cache(input_data, execution_result, execution_state)
+            # VALIDATION MODE: Compare with historical result if it exists
+            from rh_agents.core.state_recovery import ReplayMode
+            if execution_state.replay_mode == ReplayMode.VALIDATION:
+                if execution_state.history.has_completed_event(current_address):
+                    historical_event = execution_state.history[current_address]
+                    if hasattr(historical_event, 'result') and historical_event.result is not None:
+                        # Simple comparison - can be enhanced
+                        if historical_event.result != result:
+                            print(f"WARNING: Validation mismatch at {current_address}")
+                            print(f"  Historical: {historical_event.result}")
+                            print(f"  Current: {result}")
             
             return execution_result
 

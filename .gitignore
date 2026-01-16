@@ -13,3 +13,4 @@ env/
 rh_agents.egg-info
 examples/.cache/
 examples/.cache/executions/cache_index.json
+.state_store

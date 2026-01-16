@@ -1,11 +1,18 @@
 """
 FastAPI example for agent execution with streaming events.
-Minimal setup - customize as needed.
+
+This example demonstrates how to use EventStreamer for SSE (Server-Sent Events)
+streaming with minimal boilerplate. EventStreamer works just like EventPrinter -
+simply plug it into the event bus!
+
+Key simplification:
+- Before: 60+ lines of queue management, async generator logic, error handling
+- After: 4 lines - create streamer, subscribe to bus, start task, return stream
+
+See STREAMING_SIMPLE.md for detailed comparison and usage guide.
 """
 import asyncio
-import json
 from pathlib import Path
-from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,6 +35,7 @@ from rh_agents.core.result_types import Tool_Result
 from rh_agents.core.events import ExecutionEvent
 from rh_agents.core.execution import EventBus, ExecutionState
 from rh_agents.cache_backends import FileCacheBackend
+from rh_agents.bus_handlers import EventStreamer
 from rh_agents.models import AuthorType, Message
 
 
@@ -113,14 +121,10 @@ async def stream_execution(request: QueryRequest):
     # Setup cache backend
     cache_backend = FileCacheBackend(cache_dir=".cache/executions") if request.use_cache else None
     
-    # Create event bus and queue for real-time streaming
+    # Create event bus with SSE streamer (just like EventPrinter!)
     bus = EventBus()
-    event_queue: asyncio.Queue[ExecutionEvent] = asyncio.Queue()
-
-    async def queue_handler(event: ExecutionEvent):
-        await event_queue.put(event)
-
-    bus.subscribe(queue_handler)
+    streamer = EventStreamer(include_cache_stats=True)
+    bus.subscribe(streamer)
     
     # Create execution state
     agent_execution_state = ExecutionState(event_bus=bus, cache_backend=cache_backend)
@@ -135,65 +139,14 @@ async def stream_execution(request: QueryRequest):
     # Create message
     message = Message(content=request.query, author=AuthorType.USER)
     
-    async def run_execution(
-        omni_agent: OmniAgent,
-        message: Message,
-        state: ExecutionState,
-    ):
-        await ExecutionEvent[Message](actor=omni_agent)(
-            message, "", state
-        )
+    # Start execution task
+    execution_task = asyncio.create_task(
+        ExecutionEvent[Message](actor=omni_agent)(message, "", agent_execution_state)
+    )
     
-    async def event_generator() -> AsyncGenerator[str, None]:
-        # Yield immediately to start the HTTP streaming response
-        yield ": stream-start\n\n"
-
-        execution_task = asyncio.create_task(
-            run_execution(
-                omni_agent=omni_agent,
-                message=message,
-                state=agent_execution_state,
-            )
-        )
-
-        try:
-            while True:
-                # Exit condition
-                if execution_task.done() and event_queue.empty():
-                    break
-
-                try:
-                    event = await asyncio.wait_for(
-                        event_queue.get(),
-                        timeout=0.25,
-                    )
-                    yield f"data: {event.model_dump_json()}\n\n"
-
-                except asyncio.TimeoutError:
-                    # heartbeat (forces flush)
-                    yield ": keep-alive\n\n"
-
-            # Propagate execution errors if any
-            await execution_task
-
-            final_event = {
-                "event_type": "complete",
-                "message": "Execution completed successfully",
-            }
-
-            if cache_backend:
-                final_event["cache_stats"] = cache_backend.get_stats()
-            yield f"data: {json.dumps(final_event)}\n\n"
-
-        except Exception as e:
-            error_event = {
-                "event_type": "error",
-                "message": str(e),
-            }
-            yield f"data: {json.dumps(error_event)}\n\n"
-    
+    # Return streaming response - streamer handles all the complexity!
     return StreamingResponse(
-        event_generator(),
+        streamer.stream(execution_task=execution_task, cache_backend=cache_backend),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

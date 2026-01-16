@@ -1,10 +1,44 @@
+from __future__ import annotations
+"""DEPRECATED: This cache module is deprecated in favor of the state recovery system.
+
+Please use rh_agents.core.state_recovery and rh_agents.state_backends instead.
+
+Old cache system (hash-based):
+- Used hash of inputs to cache results
+- Required cache_backend parameter
+- Limited to result caching only
+
+New state recovery system (address-based):
+- Uses execution address for event matching
+- Supports full state save/restore
+- Enables user-in-the-loop workflows
+- Supports selective replay via resume_from_address
+- Artifacts stored separately with content-addressable IDs
+
+Migration guide:
+1. Replace cache_backend with state_backend and artifact_backend
+2. Use ExecutionState.save_checkpoint() instead of cache.set()
+3. Use ExecutionState.load_from_state_id() instead of cache.get()
+4. Events automatically replay with cached results
+
+See docs/STATE_RECOVERY_SPEC.md for details.
+"""
+
+import warnings
+
+warnings.warn(
+    "rh_agents.core.cache is deprecated. Use rh_agents.core.state_recovery instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
+# Original docstring preserved below:
 """
 Cache abstraction for execution result caching and recovery.
 
 This module contains the abstract base class and core utilities.
 Concrete implementations are in rh_agents.cache_backends module.
 """
-from __future__ import annotations
 import hashlib
 import json
 from abc import ABC, abstractmethod

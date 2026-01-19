@@ -23,4 +23,9 @@ setup(
         'pydantic==2.12.5',
         'jsonpatch==1.33'
     ],
+    package_data={
+        "rh_agents": ["py.typed"],
+        "rh_agents.core": ["py.typed"],
+    },
+    include_package_data=True,
 )

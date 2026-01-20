@@ -12,6 +12,7 @@ class LLM_Result(BaseModel):
     tools: list[LLM_Tool_Call] = Field(default_factory=list)
     tokens_used: Union[int, None] = None
     model_name: Union[str, None] = None
+    error_message: Union[str, None] = None
     
     @property
     def is_content(self) -> bool:
@@ -20,6 +21,10 @@ class LLM_Result(BaseModel):
     @property
     def is_tool_call(self) -> bool:
         return len(self.tools) > 0
+    
+    @property
+    def succeeded(self) -> bool:
+        return self.error_message is None
 
 class Tool_Result(BaseModel):
     """Result type for Tool actor executions"""

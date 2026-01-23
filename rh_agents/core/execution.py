@@ -2,13 +2,13 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Any, Callable, Union, Optional, Awaitable, AsyncGenerator
+from typing import Any, Callable, Union, Optional, Awaitable, AsyncGenerator, TYPE_CHECKING
 from pydantic import BaseModel, Field, field_serializer
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rh_agents.core.events import ExecutionEvent
     from rh_agents.core.state_backend import StateBackend, ArtifactBackend
     from rh_agents.core.state_recovery import StateSnapshot, StateStatus, StateMetadata
+    from rh_agents.core.parallel import ParallelExecutionManager, ErrorStrategy
 from rh_agents.core.types import EventType, ExecutionStatus
 from rh_agents.core.state_recovery import ReplayMode
 import inspect
@@ -37,10 +37,10 @@ class ExecutionStore(BaseModel):
 
 
 class HistorySet(BaseModel):
-    events: list[Any] = Field(default_factory=list)  # Use Any instead of ExecutionEvent
+    events: list[Any] = Field(default_factory=list)  # ExecutionEvent | dict at runtime
     __events: dict[str, Any] = {}
 
-    def __init__(self, events: list[Any] | None = None, **data):
+    def __init__(self, events: list[Union['ExecutionEvent', dict[str, Any]]] | None = None, **data):  # type: ignore[name-defined]
         if events is None:
             events = []
         super().__init__(events=events, **data)
@@ -60,20 +60,24 @@ class HistorySet(BaseModel):
         for address, event in self.__events.items():
             yield address, event
 
-    def get_event_list(self) -> list[Any]:
+    def get_event_list(self) -> list[Union['ExecutionEvent', dict[str, Any]]]:
         return list(self.__events.values())
     
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> Union['ExecutionEvent', dict[str, Any]]:
         return self.__events[key]
     
-    def __setitem__(self, key: str, value: Any):
+    def __setitem__(self, key: str, value: Union['ExecutionEvent', dict[str, Any]]):
         """Store event and update latest event lookup for the address"""
         self.__events[key] = value
         self.events.append(value)
         
-    def add(self, event: Any):
+    def add(self, event: Union['ExecutionEvent', dict[str, Any]]):
         """Add event to history, keeping all events while updating latest lookup"""
-        self.__setitem__(event.address, event)
+        if isinstance(event, dict):
+            address = event.get('address', '')
+        else:
+            address = event.address
+        self.__setitem__(address, event)
     
     def get_event_result(self, address: str) -> Optional[Any]:
         """Get the result from a completed event at given address."""
@@ -102,11 +106,10 @@ class HistorySet(BaseModel):
 
 class EventBus(BaseModel):
     subscribers: list[Callable] = Field(default_factory=list)
-    events: list[Any] = Field(default_factory=list)
+    events: list[Any] = Field(default_factory=list)  # ExecutionEvent at runtime
     queue: asyncio.Queue = Field(default_factory=asyncio.Queue)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
     def subscribe(self, handler: Callable):
         self.subscribers.append(handler)
@@ -128,7 +131,7 @@ class EventBus(BaseModel):
         # Yield control to allow other tasks (like stream generators) to process the event
         await asyncio.sleep(0)
 
-    async def stream(self) -> AsyncGenerator[Any, None]:
+    async def stream(self) -> AsyncGenerator['ExecutionEvent', None]:
         while True:
             event = await self.queue.get()
             yield event
@@ -146,7 +149,7 @@ class ExecutionState(BaseModel):
     
     # Core state components
     storage: ExecutionStore = Field(default_factory=lambda: ExecutionStore())
-    current_execution: Union[Any, None] = None  # Use Any instead of ExecutionEvent
+    current_execution: Any = None  # ExecutionEvent at runtime
     history: HistorySet = Field(default_factory=HistorySet)
     execution_stack: list[str] = Field(default_factory=list, description="Stack tracking current execution path (agent/tool names)")
     
@@ -202,7 +205,7 @@ class ExecutionState(BaseModel):
             return self.execution_stack.pop()
         return None
     
-    async def add_event(self, event: Any, status: ExecutionStatus):
+    async def add_event(self, event: 'ExecutionEvent', status: ExecutionStatus):
         """Add event to history and conditionally publish to event bus."""
         event.address = self.get_current_address(event.actor.event_type)
         event.execution_status = status
@@ -240,14 +243,14 @@ class ExecutionState(BaseModel):
     def parallel(
         self,
         max_workers: int = 5,
-        error_strategy: Optional[Any] = None,
+        error_strategy: Optional['ErrorStrategy'] = None,
         timeout: Optional[float] = None,
         name: Optional[str] = None,
         max_retries: int = 0,
         retry_delay: float = 1.0,
         circuit_breaker_threshold: int = 5,
         circuit_breaker_timeout: float = 60.0
-    ) -> Any:
+    ) -> 'ParallelExecutionManager':
         """
         Create a parallel execution context for running independent events concurrently.
         

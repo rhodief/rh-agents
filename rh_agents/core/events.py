@@ -186,12 +186,17 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             if execution_state.replay_mode == ReplayMode.VALIDATION:
                 if execution_state.history.has_completed_event(current_address):
                     historical_event = execution_state.history[current_address]
-                    if hasattr(historical_event, 'result') and historical_event.result is not None:
-                        # Simple comparison - can be enhanced
-                        if historical_event.result != result:
-                            print(f"WARNING: Validation mismatch at {current_address}")
-                            print(f"  Historical: {historical_event.result}")
-                            print(f"  Current: {result}")
+                    # Handle both ExecutionEvent objects and dict representations
+                    historical_result = None
+                    if isinstance(historical_event, dict):
+                        historical_result = historical_event.get('result')
+                    elif hasattr(historical_event, 'result'):
+                        historical_result = historical_event.result
+                    
+                    if historical_result is not None and historical_result != result:
+                        print(f"WARNING: Validation mismatch at {current_address}")
+                        print(f"  Historical: {historical_result}")
+                        print(f"  Current: {result}")
             
             return execution_result
 

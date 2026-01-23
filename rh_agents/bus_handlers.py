@@ -249,6 +249,281 @@ def create_event_handler(printer: EventPrinter | None = None) -> Callable:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Parallel Event Printer - Phase 6
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ParallelEventPrinter(EventPrinter):
+    """Enhanced event printer with parallel execution support."""
+    
+    def __init__(
+        self,
+        show_timestamp: bool = True,
+        show_address: bool = True,
+        parallel_mode: Optional[str] = "realtime"
+    ):
+        """
+        Initialize parallel event printer.
+        
+        Args:
+            show_timestamp: Show timestamp for each event
+            show_address: Show event address
+            parallel_mode: Display mode - "realtime" (interleaved) or "progress" (bars)
+        """
+        super().__init__(show_timestamp=show_timestamp, show_address=show_address)
+        
+        # Import here to avoid circular dependency
+        from rh_agents.core.parallel import ParallelDisplayMode, ParallelGroupTracker
+        
+        self.parallel_mode = parallel_mode or "realtime"
+        self.parallel_groups: dict[str, ParallelGroupTracker] = {}
+        self.ParallelGroupTracker = ParallelGroupTracker
+        self.ParallelDisplayMode = ParallelDisplayMode
+    
+    def print_event(self, event: ExecutionEvent):
+        """Print event with parallel group awareness."""
+        # Check if this is a parallel event
+        if event.is_parallel and event.group_id:
+            self._handle_parallel_event(event)
+        else:
+            # Regular event - use parent implementation
+            super().print_event(event)
+    
+    def _handle_parallel_event(self, event: ExecutionEvent):
+        """Handle parallel execution events."""
+        group_id = event.group_id
+        
+        # Initialize group tracker if needed
+        if group_id not in self.parallel_groups:
+            self._initialize_group(event)
+        
+        tracker = self.parallel_groups[group_id]
+        
+        # Update tracker based on event status
+        status = event.execution_status
+        
+        if status == ExecutionStatus.STARTED:
+            tracker.started += 1
+            tracker.last_update_time = asyncio.get_event_loop().time()
+        elif status == ExecutionStatus.COMPLETED:
+            tracker.completed += 1
+            tracker.last_update_time = asyncio.get_event_loop().time()
+        elif status == ExecutionStatus.FAILED:
+            tracker.failed += 1
+            tracker.last_update_time = asyncio.get_event_loop().time()
+        
+        # Display based on mode
+        if self.parallel_mode == "realtime":
+            self._print_realtime_event(event, tracker)
+        elif self.parallel_mode == "progress":
+            self._print_progress_mode(event, tracker)
+        else:
+            # Fallback to realtime
+            self._print_realtime_event(event, tracker)
+        
+        # Check if group is complete
+        if tracker.is_complete:
+            self._print_group_summary(tracker)
+    
+    def _initialize_group(self, event: ExecutionEvent):
+        """Initialize tracking for a new parallel group."""
+        group_id = event.group_id
+        
+        # Create tracker - we'll set total later when we know it
+        tracker = self.ParallelGroupTracker(
+            group_id=group_id,
+            name=event.detail or f"Group {group_id}",
+            total=0,  # Will be updated as events arrive
+            started=0,
+            completed=0,
+            failed=0,
+            start_time=asyncio.get_event_loop().time(),
+            last_update_time=asyncio.get_event_loop().time()
+        )
+        
+        self.parallel_groups[group_id] = tracker
+        
+        # Print group start header (different for each mode)
+        if self.parallel_mode == "progress":
+            # For progress mode, just print a simple header
+            print(f"\n{self.BOLD}{self.CYAN}{'═' * 70}{self.RESET}")
+            print(f"{self.CYAN}Starting: {self.BOLD}{tracker.name}{self.RESET}")
+            print(f"{self.CYAN}{'═' * 70}{self.RESET}\n")
+        else:
+            # Realtime mode - original header
+            print(f"\n{self.BOLD}{self.CYAN}{'═' * 70}{self.RESET}")
+            print(f"{self.CYAN}▶ Parallel Group Started: {self.BOLD}{tracker.name}{self.RESET}")
+            print(f"{self.CYAN}{'═' * 70}{self.RESET}\n")
+    
+    def _print_realtime_event(self, event: ExecutionEvent, tracker: "ParallelGroupTracker"):
+        """Print event in real-time mode (interleaved output)."""
+        status = event.execution_status
+        symbol, color, status_text = self.STATUS_CONFIG.get(
+            status, ("?", self.WHITE, "UNKNOWN")
+        )
+        
+        # Event icon
+        event_icon = self.EVENT_ICONS.get(event.actor.event_type, "📌")
+        
+        # Indent for parallel events
+        indent = "  │ "
+        
+        # Format actor name with index
+        actor_name = event.actor.name
+        if event.parallel_index is not None:
+            actor_name = f"{actor_name} #{event.parallel_index}"
+        
+        # Time formatting
+        time_str = self._format_time(event.execution_time)
+        time_display = f" {self.GRAY}({time_str}){self.RESET}" if time_str else ""
+        
+        # Build output
+        main_line = (
+            f"{self.GRAY}{indent}{self.RESET}"
+            f"{color}{self.BOLD}{symbol}{self.RESET} "
+            f"{event_icon} "
+            f"{self.BOLD}{actor_name}{self.RESET} "
+            f"{color}[{status_text}]{self.RESET}"
+            f"{time_display}"
+        )
+        
+        print(main_line)
+        
+        # Show detail if available (truncated)
+        if event.detail and len(event.detail) > 0:
+            detail_preview = self._truncate(event.detail.replace('\n', ' '), 80)
+            detail_line = f"{self.GRAY}{indent}  ├─ 💬 {detail_preview}{self.RESET}"
+            print(detail_line)
+        
+        # Show error message if failed
+        if status == ExecutionStatus.FAILED and event.message:
+            error_msg = self._truncate(event.message, 80)
+            error_line = f"{self.GRAY}{indent}  └─ {self.RED}⚠️  {error_msg}{self.RESET}"
+            print(error_line)
+    
+    def _print_progress_mode(self, event: ExecutionEvent, tracker: "ParallelGroupTracker"):
+        """Print event in progress bar mode with visual progress bar."""
+        import sys
+        import shutil
+        
+        status = event.execution_status
+        
+        # On first event, update total and print initial progress bar
+        if tracker.total == 0 and status == ExecutionStatus.STARTED:
+            # We don't know total yet, just track started
+            tracker.total = max(tracker.started, tracker.completed + tracker.failed)
+        
+        # Update total if needed (as more events come in)
+        tracker.total = max(tracker.total, tracker.started, tracker.completed + tracker.failed)
+        
+        # Check if we're in a TTY
+        is_tty = sys.stdout.isatty()
+        
+        if is_tty and tracker.progress_line_number is not None:
+            # Move cursor up to progress line and redraw
+            lines_to_move = 1
+            sys.stdout.write(f"\033[{lines_to_move}A")  # Move up
+            sys.stdout.write("\033[K")  # Clear line
+            self._render_progress_bar(tracker)
+            sys.stdout.flush()
+        else:
+            # First time or not TTY - just print
+            self._render_progress_bar(tracker)
+            if is_tty:
+                tracker.progress_line_number = 0  # Mark that we've printed
+        
+        # Show individual event details below progress bar (only for failures or completed)
+        if status == ExecutionStatus.FAILED:
+            indent = "  "
+            error_msg = self._truncate(event.message or "Unknown error", 60)
+            actor_name = event.actor.name
+            if event.parallel_index is not None:
+                actor_name = f"{actor_name} #{event.parallel_index}"
+            
+            error_line = (
+                f"{indent}{self.RED}✖{self.RESET} {actor_name}: {error_msg}"
+            )
+            print(error_line)
+    
+    def _render_progress_bar(self, tracker: "ParallelGroupTracker"):
+        """Render a visual progress bar for a parallel group."""
+        import shutil
+        
+        # Get terminal width
+        try:
+            terminal_width = shutil.get_terminal_size().columns
+        except:
+            terminal_width = 80
+        
+        # Calculate progress
+        total = max(tracker.total, 1)  # Avoid division by zero
+        completed = tracker.completed + tracker.failed
+        percentage = (completed / total) * 100
+        
+        # Calculate elapsed time
+        elapsed = asyncio.get_event_loop().time() - tracker.start_time
+        elapsed_str = self._format_time(elapsed)
+        
+        # Build progress bar components
+        group_name = tracker.name or "Parallel Group"
+        
+        # Status indicators
+        success_indicator = f"{self.GREEN}{tracker.completed}✓{self.RESET}" if tracker.completed > 0 else ""
+        fail_indicator = f"{self.RED}{tracker.failed}✖{self.RESET}" if tracker.failed > 0 else ""
+        indicators = " ".join(filter(None, [success_indicator, fail_indicator]))
+        
+        # Progress text
+        progress_text = f"{completed}/{total}"
+        
+        # Header line
+        header = f"{self.BOLD}{self.CYAN}▶ {group_name}{self.RESET}"
+        status_info = f"[{progress_text}] {percentage:.0f}% {indicators} {self.GRAY}({elapsed_str}){self.RESET}"
+        
+        # Calculate bar width
+        # Format: "▶ Name [10/20] 50% 5✓ 1✖ (1.2s) [=========>          ]"
+        header_text_len = len(group_name) + 2  # "▶ " prefix
+        status_text_len = len(progress_text) + len(str(int(percentage))) + 10  # rough estimate
+        available_bar_width = terminal_width - header_text_len - status_text_len - 10
+        available_bar_width = max(20, min(50, available_bar_width))  # Clamp between 20-50
+        
+        # Build the progress bar
+        filled_width = int((completed / total) * available_bar_width)
+        empty_width = available_bar_width - filled_width
+        
+        # Bar characters
+        if percentage >= 100:
+            bar = f"{self.GREEN}{'█' * available_bar_width}{self.RESET}"
+        else:
+            bar = f"{self.CYAN}{'█' * filled_width}{self.RESET}{self.GRAY}{'░' * empty_width}{self.RESET}"
+        
+        # Print the complete progress line
+        print(f"{header} {status_info}")
+        print(f"  [{bar}]")
+    
+    
+    def _print_group_summary(self, tracker: "ParallelGroupTracker"):
+        """Print summary when parallel group completes."""
+        elapsed = asyncio.get_event_loop().time() - tracker.start_time
+        elapsed_str = self._format_time(elapsed)
+        
+        total = tracker.completed + tracker.failed
+        success_rate = (tracker.completed / total * 100) if total > 0 else 0
+        
+        # For progress mode, print final progress bar then summary
+        if self.parallel_mode == "progress":
+            print()  # Blank line after last progress update
+            self._render_progress_bar(tracker)
+            print()
+        
+        print(f"\n{self.GRAY}{'─' * 70}{self.RESET}")
+        print(f"{self.BOLD}✓ Parallel Group Complete: {tracker.name}{self.RESET}")
+        print(f"  {self.GREEN}├─{self.RESET} Completed: {self.GREEN}{tracker.completed}{self.RESET}")
+        print(f"  {self.RED}├─{self.RESET} Failed: {self.RED}{tracker.failed}{self.RESET}")
+        print(f"  {self.MAGENTA}├─{self.RESET} Success Rate: {self.GREEN}{success_rate:.1f}%{self.RESET}")
+        print(f"  {self.MAGENTA}└─{self.RESET} Total Time: {self.MAGENTA}{elapsed_str}{self.RESET}")
+        print(f"{self.GRAY}{'─' * 70}{self.RESET}\n")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SSE Event Streamer (for FastAPI streaming)
 # ═══════════════════════════════════════════════════════════════════════════════
 

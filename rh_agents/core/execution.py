@@ -237,6 +237,78 @@ class ExecutionState(BaseModel):
         """Retrieve all stored execution results"""
         return self.storage.data.copy()
     
+    def parallel(
+        self,
+        max_workers: int = 5,
+        error_strategy: Optional[Any] = None,
+        timeout: Optional[float] = None,
+        name: Optional[str] = None,
+        max_retries: int = 0,
+        retry_delay: float = 1.0,
+        circuit_breaker_threshold: int = 5,
+        circuit_breaker_timeout: float = 60.0
+    ) -> Any:
+        """
+        Create a parallel execution context for running independent events concurrently.
+        
+        This method returns a ParallelExecutionManager that can be used as an async
+        context manager to execute multiple events in parallel with controlled concurrency.
+        
+        Args:
+            max_workers: Maximum number of concurrent workers (default: 5)
+            error_strategy: How to handle errors - ErrorStrategy.FAIL_SLOW (default) 
+                          or ErrorStrategy.FAIL_FAST
+            timeout: Optional timeout in seconds for the entire parallel group
+            name: Optional human-readable name for the parallel group
+            max_retries: Number of retry attempts for failed tasks (default: 0)
+            retry_delay: Base delay between retries in seconds (default: 1.0)
+            circuit_breaker_threshold: Failures before circuit opens (default: 5)
+            circuit_breaker_timeout: Seconds before circuit half-opens (default: 60.0)
+        
+        Returns:
+            ParallelExecutionManager instance ready to use as context manager
+        
+        Example:
+            ```python
+            # Basic parallel execution
+            async with execution_state.parallel(max_workers=5) as p:
+                p.add(event1(input1, context, state))
+                p.add(event2(input2, context, state))
+                p.add(event3(input3, context, state))
+                results = await p.gather()
+            
+            # With error handling and retries
+            async with execution_state.parallel(
+                max_workers=3,
+                error_strategy=ErrorStrategy.FAIL_FAST,
+                timeout=30.0,
+                name="Document Processing",
+                max_retries=3,
+                retry_delay=1.0
+            ) as p:
+                for doc in documents:
+                    p.add(process_document(doc, context, state))
+                results = await p.gather()
+            ```
+        """
+        from rh_agents.core.parallel import ParallelExecutionManager, ErrorStrategy
+        
+        # Use default error strategy if not provided
+        if error_strategy is None:
+            error_strategy = ErrorStrategy.FAIL_SLOW
+        
+        return ParallelExecutionManager(
+            execution_state=self,
+            max_workers=max_workers,
+            error_strategy=error_strategy,
+            timeout=timeout,
+            name=name,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            circuit_breaker_threshold=circuit_breaker_threshold,
+            circuit_breaker_timeout=circuit_breaker_timeout
+        )
+    
     def should_skip_event(self, address: str) -> bool:
         """
         Check if event should be skipped during replay.

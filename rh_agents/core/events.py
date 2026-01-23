@@ -34,6 +34,11 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     is_replayed: bool = Field(default=False, description="True if event was recovered from restored state")
     skip_republish: bool = Field(default=False, description="If True, skip publishing to event bus (replay control)")
     
+    # Parallel execution fields
+    group_id: Union[str, None] = Field(default=None, description="Parallel group ID if part of parallel execution")
+    parallel_index: Union[int, None] = Field(default=None, description="Index within parallel group")
+    is_parallel: bool = Field(default=False, description="True if event is part of parallel group")
+    
     @field_serializer('actor')
     def serialize_actor(self, actor: BaseActor) -> dict:
         """Serialize actor to a JSON-safe dict with only relevant fields."""

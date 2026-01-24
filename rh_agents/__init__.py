@@ -37,7 +37,18 @@ from rh_agents.models import Message, AuthorType, ArtifactRef
 # Parallel execution
 from rh_agents.core.parallel import ErrorStrategy, ParallelEventGroup
 
-__version__ = "1.1.0"
+# Additional helpers (Phase 2)
+from rh_agents.decorators import tool as tool_decorator, agent as agent_decorator
+from rh_agents.validation import (
+    validate_actor,
+    validate_state,
+    validate_handler_signature,
+    ActorValidationError,
+    StateValidationError
+)
+from rh_agents.builders import AgentBuilder, ToolBuilder
+
+__version__ = "1.5.0"
 
 __all__ = [
     # Core actors
@@ -75,4 +86,16 @@ __all__ = [
     # Parallel
     "ErrorStrategy",
     "ParallelEventGroup",
+    # Decorators
+    "tool_decorator",
+    "agent_decorator",
+    # Validation
+    "validate_actor",
+    "validate_state",
+    "validate_handler_signature",
+    "ActorValidationError",
+    "StateValidationError",
+    # Builders
+    "AgentBuilder",
+    "ToolBuilder",
 ]

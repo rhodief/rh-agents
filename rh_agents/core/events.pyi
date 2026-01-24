@@ -14,8 +14,8 @@ class ExecutionResult(Generic[T]):
 class ExecutionEvent(Generic[T]):
     actor: BaseActor
     async def __call__(
-        self, 
-        input_data: Any, 
-        extra_context: str, 
+        self,
+        input_data: Any,
+        extra_context: str,
         execution_state: ExecutionState
     ) -> ExecutionResult[T]: ...

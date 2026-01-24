@@ -22,12 +22,14 @@ def tool(
 ) -> Callable[[F], Tool]:
     """
     Decorator to create a Tool from an async function.
-    
+
     Usage:
         @tool(name="calculator", description="Performs calculations")
-        async def calculate(input: CalculatorArgs, context: str, state: ExecutionState) -> Tool_Result:
+        async def calculate(
+            input: CalculatorArgs, context: str, state: ExecutionState
+        ) -> Tool_Result:
             return Tool_Result(output=input.a + input.b, tool_name="calculator")
-    
+
     Args:
         name: Tool name (defaults to function name)
         description: Tool description (defaults to function docstring)
@@ -36,29 +38,35 @@ def tool(
     """
     def decorator(func: F) -> Tool:
         import inspect
-        
+
         # Extract function metadata
         tool_name = name or func.__name__
         tool_description = description or func.__doc__ or f"Tool: {tool_name}"
-        
+
         # Get type hints to determine input model
         sig = inspect.signature(func)
         params = list(sig.parameters.values())
-        
+
         if not params:
-            raise ValueError(f"Tool handler {func.__name__} must have at least one parameter (input_data)")
-        
+            raise ValueError(
+                f"Tool handler {func.__name__} must have at least "
+                "one parameter (input_data)"
+            )
+
         input_param = params[0]
         if input_param.annotation == inspect.Parameter.empty:
-            raise ValueError(f"Tool handler {func.__name__} first parameter must be type-annotated")
-        
+            raise ValueError(
+                f"Tool handler {func.__name__} first parameter must be "
+                "type-annotated"
+            )
+
         input_model = input_param.annotation
-        
+
         # Wrap function to match expected signature
         @wraps(func)
         async def handler(input_data: BaseModel, context: str, state: ExecutionState) -> Any:
             return await func(input_data, context, state)
-        
+
         return Tool(
             name=tool_name,
             description=tool_description,
@@ -67,7 +75,7 @@ def tool(
             cacheable=cacheable,
             version=version
         )
-    
+
     return decorator
 
 
@@ -80,13 +88,13 @@ def agent(
 ) -> Callable[[F], Agent]:
     """
     Decorator to create an Agent from an async function.
-    
+
     Usage:
         @agent(name="DoctrineAgent", tools=[tool1, tool2], llm=my_llm)
         async def handle_doctrine(input: Message, context: str, state: ExecutionState) -> Doctrine:
             # Agent logic here
             return result
-    
+
     Args:
         name: Agent name (defaults to function name)
         description: Agent description (defaults to function docstring)
@@ -96,28 +104,35 @@ def agent(
     """
     def decorator(func: F) -> Agent:
         import inspect
-        
+
         agent_name = name or func.__name__
         agent_description = description or func.__doc__ or f"Agent: {agent_name}"
-        
+
         # Get type hints
         sig = inspect.signature(func)
         params = list(sig.parameters.values())
-        
+
         if not params:
             raise ValueError(f"Agent handler {func.__name__} must have at least one parameter")
-        
+
         input_param = params[0]
         if input_param.annotation == inspect.Parameter.empty:
-            raise ValueError(f"Agent handler {func.__name__} first parameter must be type-annotated")
-        
+            raise ValueError(
+                f"Agent handler {func.__name__} first parameter must be "
+                "type-annotated"
+            )
+
         input_model = input_param.annotation
-        output_model = sig.return_annotation if sig.return_annotation != inspect.Signature.empty else None
-        
+        output_model = (
+            sig.return_annotation
+            if sig.return_annotation != inspect.Signature.empty
+            else None
+        )
+
         @wraps(func)
         async def handler(input_data: BaseModel, context: str, state: ExecutionState) -> Any:
             return await func(input_data, context, state)
-        
+
         return Agent(
             name=agent_name,
             description=agent_description,
@@ -128,5 +143,5 @@ def agent(
             llm=llm,
             cacheable=cacheable
         )
-    
+
     return decorator

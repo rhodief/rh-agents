@@ -7,7 +7,7 @@ running multiple independent tasks concurrently with controlled concurrency.
 """
 
 import asyncio
-from rh_agents.core.execution import ExecutionState
+from rh_agents import ExecutionState
 
 
 async def process_document(doc_id: int) -> str:

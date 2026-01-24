@@ -11,8 +11,7 @@ This example demonstrates the different error handling strategies:
 
 import asyncio
 import random
-from rh_agents.core.execution import ExecutionState
-from rh_agents.core.parallel import ErrorStrategy
+from rh_agents import ExecutionState, ErrorStrategy
 
 
 async def unreliable_task(task_id: int, failure_rate: float = 0.3) -> str:

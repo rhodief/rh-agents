@@ -10,7 +10,7 @@ using the streaming mode, which is useful for:
 """
 
 import asyncio
-from rh_agents.core.execution import ExecutionState
+from rh_agents import ExecutionState
 
 
 async def fetch_api_data(api_id: int, delay: float) -> dict:

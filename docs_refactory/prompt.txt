@@ -1,0 +1,7 @@
+Analyse the whole archtecture of this package and try to figure out unecessary design and bolerplate issues. 
+The package has working well, but I think in same cases too verbose, some generics are not necessary (but other are, cause we value no lint issues) and some structures are unused, like some super().__init__ calls that I submite structures that will never be used. 
+So, create a comprehensive spec in docs_refactory folder with the current package strucure and the issues found and a overall solucion design
+Create a section with questions about design decisions, for each one put some details about the question, options to go, pros and cons for each one, suggestion and a placeholder for me to decide. 
+If you have other suggestion, put in the same section with the same structure. 
+Do it carrefuly, cause this is a broad refactory for inteface only, but keeping the functionalities. The goal is to get rid of unecessary structures and keep them simple, pythonic, testable and easy to use. 
+

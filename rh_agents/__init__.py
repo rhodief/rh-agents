@@ -48,7 +48,7 @@ from rh_agents.validation import (
 )
 from rh_agents.builders import AgentBuilder, ToolBuilder
 
-__version__ = "1.5.0"
+__version__ = "2.0.0"
 
 __all__ = [
     # Core actors

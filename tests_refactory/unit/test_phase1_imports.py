@@ -92,7 +92,7 @@ def test_version_available():
     
     assert __version__ is not None
     assert isinstance(__version__, str)
-    assert __version__ == "1.5.0"
+    assert __version__ == "2.0.0"
 
 
 def test_all_exports():

@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="rh_agents",
-    version="0.0.1-beta-6",
+    version="2.0.0",
     author="rhodie",
     author_email="rhandref@gmail.com",
     description="Doctrine-Driven IA Actors (Humans + Agents + System) Orchestration Framework",

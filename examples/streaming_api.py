@@ -31,7 +31,7 @@ from rh_agents.agents import (
     StepExecutorAgent
 )
 from rh_agents import Tool, Tool_Result, ExecutionEvent, ExecutionState, Message, AuthorType
-from rh_agents.cache_backends import FileCacheBackend
+from rh_agents import FileSystemStateBackend, FileSystemArtifactBackend
 from rh_agents.bus_handlers import EventStreamer
 
 
@@ -114,8 +114,8 @@ async def stream_execution(request: QueryRequest):
     step_executor_agent = StepExecutorAgent(llm=llm, tools=tools_2)
     reviewer_agent = ReviewerAgent(llm=llm, tools=[])
     
-    # Setup cache backend
-    cache_backend = FileCacheBackend(cache_dir=".cache/executions") if request.use_cache else None
+    # Setup state backend for persistence (if caching enabled)
+    state_backend = FileSystemStateBackend(".state_store") if request.use_cache else None
     
     # Create event bus with SSE streamer (just like EventPrinter!)
     bus = EventBus()
@@ -123,7 +123,7 @@ async def stream_execution(request: QueryRequest):
     bus.subscribe(streamer)
     
     # Create execution state
-    agent_execution_state = ExecutionState(event_bus=bus, cache_backend=cache_backend)
+    agent_execution_state = ExecutionState(event_bus=bus, state_backend=state_backend)
     
     # Create OmniAgent
     omni_agent = OmniAgent(

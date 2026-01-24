@@ -588,15 +588,13 @@ class EventStreamer:
     
     async def stream(
         self, 
-        execution_task: Optional[asyncio.Task] = None,
-        cache_backend: Optional[Any] = None
+        execution_task: Optional[asyncio.Task] = None
     ) -> AsyncGenerator[str, None]:
         """
         Generate SSE-formatted event stream for FastAPI.
         
         Args:
             execution_task: Optional task to monitor for completion
-            cache_backend: Optional cache backend to get stats from
             
         Yields:
             SSE-formatted event strings (data: {...})
@@ -636,11 +634,6 @@ class EventStreamer:
                 "event_type": "complete",
                 "message": "Execution completed successfully"
             }
-            
-            # Add cache statistics if available
-            if self.include_cache_stats and cache_backend:
-                if hasattr(cache_backend, 'get_stats'):
-                    final_event["cache_stats"] = cache_backend.get_stats()
             
             yield f"data: {json.dumps(final_event)}\n\n"
             

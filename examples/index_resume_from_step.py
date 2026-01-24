@@ -194,7 +194,7 @@ if __name__ == "__main__":
             print(f"📝 Full replay from the beginning\n")
         
         # Execute the pipeline (will skip to resume address if set)
-        result = await ExecutionEvent[Message](actor=omni_agent)(message, "", restored_state)
+        result = await ExecutionEvent(actor=omni_agent)(message, "", restored_state)
         
         print(f"\n{'═' * 80}")
         print(f"{'✅ SELECTIVE REPLAY FINISHED':^80}")

@@ -120,7 +120,7 @@ async def run_with_cache(use_file_cache: bool = True):
     print(f"{'═' * 60}\n")
     
     await asyncio.gather(
-        ExecutionEvent[Message](actor=omni_agent)(message, "", agent_execution_state),
+        ExecutionEvent(actor=omni_agent)(message, "", agent_execution_state),
         streamer()
     )
     

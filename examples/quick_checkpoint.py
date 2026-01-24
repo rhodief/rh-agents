@@ -61,13 +61,13 @@ async def main():
     processor_actor = ProcessorActor(name="ProcessorActor")
     
     print("🔹 Step 1: SimpleActor")
-    result1 = await ExecutionEvent[Message](actor=simple_actor)(
+    result1 = await ExecutionEvent(actor=simple_actor)(
         message, "", agent_execution_state
     )
     print(f"  Result: {result1.content}\n")
     
     print("🔹 Step 2: ProcessorActor")
-    result2 = await ExecutionEvent[Message](actor=processor_actor)(
+    result2 = await ExecutionEvent(actor=processor_actor)(
         result1, "", agent_execution_state
     )
     print(f"  Result: {result2.content}\n")

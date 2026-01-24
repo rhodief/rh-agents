@@ -56,7 +56,7 @@ class TestExampleBasicUsage:
             input_model=Message,
             output_model=Message,
             handler=agent_handler,
-            tools=ToolSet([])
+            tools=ToolSet(tools=[])
         )
         
         assert agent.name == "TestAgent"
@@ -131,7 +131,7 @@ class TestExecutionFlow:
             input_model=Message,
             output_model=Message,
             handler=agent_handler,
-            tools=ToolSet([tool])
+            tools=ToolSet(tools=[tool])
         )
         
         assert len(agent.tools.tools) == 1

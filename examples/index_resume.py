@@ -171,7 +171,7 @@ if __name__ == "__main__":
         print(f"🔄 New steps execute normally\n")
         
         # Execute the pipeline (EventPrinter subscriber handles all event printing)
-        result = await ExecutionEvent[Message](actor=omni_agent)(message, "", restored_state)
+        result = await ExecutionEvent(actor=omni_agent)(message, "", restored_state)
         
         print(f"\n{'═' * 80}")
         print(f"{'✅ REPLAY EXECUTION FINISHED':^80}")

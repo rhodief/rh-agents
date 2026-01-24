@@ -124,7 +124,7 @@ if __name__ == "__main__":
         print(f"🔄 Next: Run index_resume.py to restore and continue\n")
         
         # Execute the pipeline (EventPrinter subscriber handles all event printing)
-        result = await ExecutionEvent[Message](actor=omni_agent)(message, "", agent_execution_state)
+        result = await ExecutionEvent(actor=omni_agent)(message, "", agent_execution_state)
         
         print(f"\n{'═' * 80}")
         print(f"{'💾 SAVING CHECKPOINT':^80}")

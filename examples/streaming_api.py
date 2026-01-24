@@ -137,7 +137,7 @@ async def stream_execution(request: QueryRequest):
     
     # Start execution task
     execution_task = asyncio.create_task(
-        ExecutionEvent[Message](actor=omni_agent)(message, "", agent_execution_state)
+        ExecutionEvent(actor=omni_agent)(message, "", agent_execution_state)
     )
     
     # Return streaming response - streamer handles all the complexity!

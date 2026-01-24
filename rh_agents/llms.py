@@ -5,7 +5,7 @@ from rh_agents.models import Message
 from rh_agents.openai import OpenAIRequest, openai_handler, SimplePromptRequest, simple_openai_handler
 
 
-class OpenAILLM(LLM[OpenAIRequest]):
+class OpenAILLM(LLM):
     """OpenAI LLM Actor with function calling support"""
     
     def __init__(

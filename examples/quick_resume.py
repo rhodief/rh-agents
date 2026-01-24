@@ -105,7 +105,7 @@ async def main():
     
     print("🔹 Step 1: SimpleActor")
     start = datetime.now()
-    result1 = await ExecutionEvent[Message](actor=simple_actor)(
+    result1 = await ExecutionEvent(actor=simple_actor)(
         message, "", agent_execution_state
     )
     duration1 = (datetime.now() - start).total_seconds()
@@ -119,7 +119,7 @@ async def main():
     
     print("\n🔹 Step 2: ProcessorActor")
     start = datetime.now()
-    result2 = await ExecutionEvent[Message](actor=processor_actor)(
+    result2 = await ExecutionEvent(actor=processor_actor)(
         result1, "", agent_execution_state
     )
     duration2 = (datetime.now() - start).total_seconds()
@@ -132,7 +132,7 @@ async def main():
     
     print("\n🔹 Step 3: FinalActor (NEW - not in checkpoint)")
     start = datetime.now()
-    result3 = await ExecutionEvent[Message](actor=final_actor)(
+    result3 = await ExecutionEvent(actor=final_actor)(
         result2, "", agent_execution_state
     )
     duration3 = (datetime.now() - start).total_seconds()

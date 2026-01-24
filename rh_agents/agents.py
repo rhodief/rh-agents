@@ -30,7 +30,7 @@ class StepResult(BaseModel):
     step_index: int
     result: ExecutionResult[str]
 
-class OpenAILLM(LLM[OpenAIRequest]):
+class OpenAILLM(LLM):
     """OpenAI LLM Actor with function calling support"""
     
     def __init__(
@@ -100,7 +100,7 @@ class DoctrineReceverAgent(Agent):
     '''
     
         async def handler(input_data: Message, context: str, execution_state: ExecutionState) -> Union[Doctrine, Message]:
-            llm_event = ExecutionEvent[llm.output_model](
+            llm_event = ExecutionEvent(
                 actor=llm
             )            
             # Execute LLM to parse the user input into a Doctrine
@@ -152,7 +152,7 @@ class StepExecutorAgent(Agent):
             '''
         tool_set = ToolSet(tools) if tools else ToolSet()
         async def handler(input_data: DoctrineStep, context: str, execution_state: ExecutionState) -> StepResult:
-            llm_event = ExecutionEvent[llm.output_model](
+            llm_event = ExecutionEvent(
                 actor=llm
             )           
             # Retrieve dependencies from the datastore (execution_state)
@@ -207,7 +207,7 @@ class StepExecutorAgent(Agent):
             if errors and not all_outputs:
                 return StepResult(
                     step_index=input_data.index,
-                    result=ExecutionResult[str](
+                    result=ExecutionResult(
                         ok=False,
                         erro_message="; ".join(errors)
                     )
@@ -219,7 +219,7 @@ class StepExecutorAgent(Agent):
             
             return StepResult(
                 step_index=input_data.index,
-                result=ExecutionResult[str](
+                result=ExecutionResult(
                     result=combined_output,
                     ok=True
                 )
@@ -251,7 +251,7 @@ class ReviewerAgent(Agent):
         tool_set = ToolSet(tools) if tools else ToolSet()
         
         async def handler(input_data: Doctrine, context: str, execution_state: ExecutionState) -> Message:
-            llm_event = ExecutionEvent[llm.output_model](
+            llm_event = ExecutionEvent(
                 actor=llm
             )
             
@@ -317,7 +317,7 @@ class OmniAgent(Agent):
         
         
         async def handler(input_data: Message, context: str, execution_state: ExecutionState) -> Message:
-            result = await ExecutionEvent[Union[Doctrine, Message]](actor=receiver_agent)(input_data, "", execution_state)
+            result = await ExecutionEvent(actor=receiver_agent)(input_data, "", execution_state)
             if not result.ok or result.result is None:
                 raise Exception(f"Agent execution failed: {result.erro_message}")
             if isinstance(result.result, Message):
@@ -330,7 +330,7 @@ class OmniAgent(Agent):
                 #context = f'Goal: {doctrine.goal}\nGuidelines: {doctrine.guidelines}\nConstraints: {doctrine.constraints}'
                 context = ''
                 # Execute step - the handler will retrieve dependencies from execution_state
-                step_result = await ExecutionEvent[StepResult](actor=step_executor_agent, tag=f'step_{step.index}-{len(doctrine.steps) - 1}')(step, context, execution_state)
+                step_result = await ExecutionEvent(actor=step_executor_agent, tag=f'step_{step.index}-{len(doctrine.steps) - 1}')(step, context, execution_state)
                 if not step_result.ok or step_result.result is None:
                     raise Exception(f"Step execution failed: {step_result.erro_message}")
                 execution_state.add_step_result(step.index, step_result.result)
@@ -340,7 +340,7 @@ class OmniAgent(Agent):
             print("🔍 Iniciando Revisão Final...")
             print("═" * 60 + "\n")
             
-            review_result = await ExecutionEvent[Message](actor=reviewer_agent, tag='final_review')(doctrine, '', execution_state)
+            review_result = await ExecutionEvent(actor=reviewer_agent, tag='final_review')(doctrine, '', execution_state)
             if not review_result.ok or review_result.result is None:
                 raise Exception(f"Review execution failed: {review_result.erro_message}")
             
@@ -361,5 +361,5 @@ class OmniAgent(Agent):
             output_model=Message,
             handler=handler,
             event_type=EventType.AGENT_CALL,
-            tools=ToolSet([])
+            tools=ToolSet(tools=[])
         )

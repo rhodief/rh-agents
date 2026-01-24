@@ -185,7 +185,7 @@ if __name__ == "__main__":
         print(f"🎬 From '{RESUME_FROM_ADDRESS}': RE-EXECUTED with new input\n")
         
         # Execute the pipeline
-        result = await ExecutionEvent[Message](actor=omni_agent)(message, "", restored_state)
+        result = await ExecutionEvent(actor=omni_agent)(message, "", restored_state)
         
         print(f"\n{'═' * 80}")
         print(f"{'✅ EXECUTION FINISHED':^80}")

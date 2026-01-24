@@ -37,7 +37,7 @@ async def test_artifact_storage():
     )
     
     # Create an event and execute it
-    event = ExecutionEvent[TestOutput](actor=test_actor)
+    event = ExecutionEvent(actor=test_actor)
     input_data = Message(content="test input", author=AuthorType.USER)
     
     result = await event(input_data, "", execution_state)
@@ -70,7 +70,7 @@ async def test_artifact_storage():
     
     # Test retrieval from artifact storage
     # Use the same execution state to test cache hit
-    event2 = ExecutionEvent[TestOutput](actor=test_actor)
+    event2 = ExecutionEvent(actor=test_actor)
     result2 = await event2(input_data, "", execution_state)
     
     if result2.result and result2.result.value == "test result":

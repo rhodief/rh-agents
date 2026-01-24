@@ -71,7 +71,7 @@ bus.subscribe(streamer)
 
 # Start execution
 execution_task = asyncio.create_task(
-    ExecutionEvent[Message](actor=omni_agent)(message, "", state)
+    ExecutionEvent(actor=omni_agent)(message, "", state)
 )
 
 # Return streaming response - that's it!

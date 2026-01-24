@@ -30,13 +30,9 @@ from rh_agents.agents import (
     ReviewerAgent, 
     StepExecutorAgent
 )
-from rh_agents.core.actors import Tool
-from rh_agents.core.result_types import Tool_Result
-from rh_agents.core.events import ExecutionEvent
-from rh_agents.core.execution import EventBus, ExecutionState
-from rh_agents.cache_backends import FileCacheBackend
+from rh_agents import Tool, Tool_Result, ExecutionEvent, ExecutionState, Message, AuthorType
+from rh_agents import FileSystemStateBackend, FileSystemArtifactBackend
 from rh_agents.bus_handlers import EventStreamer
-from rh_agents.models import AuthorType, Message
 
 
 # === Tool Definitions ===
@@ -118,8 +114,8 @@ async def stream_execution(request: QueryRequest):
     step_executor_agent = StepExecutorAgent(llm=llm, tools=tools_2)
     reviewer_agent = ReviewerAgent(llm=llm, tools=[])
     
-    # Setup cache backend
-    cache_backend = FileCacheBackend(cache_dir=".cache/executions") if request.use_cache else None
+    # Setup state backend for persistence (if caching enabled)
+    state_backend = FileSystemStateBackend(".state_store") if request.use_cache else None
     
     # Create event bus with SSE streamer (just like EventPrinter!)
     bus = EventBus()
@@ -127,7 +123,7 @@ async def stream_execution(request: QueryRequest):
     bus.subscribe(streamer)
     
     # Create execution state
-    agent_execution_state = ExecutionState(event_bus=bus, cache_backend=cache_backend)
+    agent_execution_state = ExecutionState(event_bus=bus, state_backend=state_backend)
     
     # Create OmniAgent
     omni_agent = OmniAgent(
@@ -141,7 +137,7 @@ async def stream_execution(request: QueryRequest):
     
     # Start execution task
     execution_task = asyncio.create_task(
-        ExecutionEvent[Message](actor=omni_agent)(message, "", agent_execution_state)
+        ExecutionEvent(actor=omni_agent)(message, "", agent_execution_state)
     )
     
     # Return streaming response - streamer handles all the complexity!

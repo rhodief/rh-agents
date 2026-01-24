@@ -2,12 +2,16 @@
 Quick checkpoint example - simplified version that completes quickly
 """
 import asyncio
-from rh_agents.core.execution import ExecutionState, EventBus
-from rh_agents.core.events import ExecutionEvent
-from rh_agents.models import Message
+from rh_agents import (
+    ExecutionState,
+    ExecutionEvent,
+    Message,
+    FileSystemStateBackend,
+    FileSystemArtifactBackend,
+    StateStatus,
+    StateMetadata
+)
 from rh_agents.core.actors import Actor
-from rh_agents.state_backends import FileSystemStateBackend, FileSystemArtifactBackend
-from rh_agents.core.state_recovery import StateStatus, StateMetadata
 import os
 
 # Simple actors for quick demo
@@ -57,13 +61,13 @@ async def main():
     processor_actor = ProcessorActor(name="ProcessorActor")
     
     print("🔹 Step 1: SimpleActor")
-    result1 = await ExecutionEvent[Message](actor=simple_actor)(
+    result1 = await ExecutionEvent(actor=simple_actor)(
         message, "", agent_execution_state
     )
     print(f"  Result: {result1.content}\n")
     
     print("🔹 Step 2: ProcessorActor")
-    result2 = await ExecutionEvent[Message](actor=processor_actor)(
+    result2 = await ExecutionEvent(actor=processor_actor)(
         result1, "", agent_execution_state
     )
     print(f"  Result: {result2.content}\n")

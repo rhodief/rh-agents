@@ -2,14 +2,13 @@ from __future__ import annotations
 import asyncio
 import datetime
 from time import time
-from typing import Self, Union, TypeVar, Generic, Any
+from typing import Self, Union, Any, Generic, TypeVar
 from pydantic import BaseModel, Field, field_serializer
 from rh_agents.core.types import ExecutionStatus
 from rh_agents.core.actors import BaseActor
 from rh_agents.core.execution import ExecutionState
 
-T = TypeVar('T', bound=Any)
-OutputT = TypeVar('OutputT', bound=BaseModel)
+T = TypeVar('T')
 
 class ExecutionResult(BaseModel, Generic[T]):
     result: Union[T, None] = Field(default=None, description="Result of the execution")
@@ -17,7 +16,7 @@ class ExecutionResult(BaseModel, Generic[T]):
     ok: bool = Field(default=True, description="Indicates if the execution was successful")
     erro_message: Union[str, None] = Field(default=None, description="Error message if execution failed")
 
-class ExecutionEvent(BaseModel, Generic[OutputT]):
+class ExecutionEvent(BaseModel):
     actor: BaseActor
     datetime: str = Field(default_factory=lambda: datetime.datetime.now().isoformat(), description="Timestamp of the event in milliseconds since epoch")
     address: str = Field(default="", description="Address of the agent triggering the event on exectution tree")
@@ -52,8 +51,9 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
         self._start_time = time()
     
     def stop_timer(self):
-        if hasattr(self, '_start_time'):
-            self.execution_time = time() - self._start_time
+        start_time = getattr(self, '_start_time', None)
+        if start_time is not None:
+            self.execution_time = time() - start_time
         else:
             self.execution_time = None
     
@@ -76,7 +76,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
     
 
     
-    async def __call__(self, input_data, extra_context, execution_state: ExecutionState) -> ExecutionResult[OutputT]:
+    async def __call__(self, input_data, extra_context, execution_state: ExecutionState) -> ExecutionResult:
         """
         Execute the wrapped actor with replay awareness and state recovery support.
         
@@ -113,13 +113,13 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
                     self.detail = f"[REPLAYED] {existing_event.get('detail', '')}"
                     stored_result = existing_event.get('result')
                 else:
-                    self.detail = f"[REPLAYED] {existing_event.detail if hasattr(existing_event, 'detail') else ''}"
+                    self.detail = f"[REPLAYED] {getattr(existing_event, 'detail', '')}"
                     stored_result = getattr(existing_event, 'result', None)
                 
                 self.message = "Recovered from restored state"
                 
                 # Publish recovery event if needed
-                await execution_state.add_event(self, ExecutionStatus.RECOVERED)
+                await execution_state.add_event(self, ExecutionStatus.RECOVERED)  # type: ignore[arg-type]
                 
                 # Return the stored result
                 if stored_result is not None:
@@ -133,7 +133,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
                                 # If reconstruction fails, use dict as-is
                                 pass
                     
-                    return ExecutionResult[OutputT](
+                    return ExecutionResult(
                         result=stored_result,  # type: ignore[arg-type]
                         execution_time=0.0,
                         ok=True
@@ -149,7 +149,7 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # Start timer and mark as started with input details
             self.start_timer()
             self.detail = self._serialize_detail(input_data)
-            await execution_state.add_event(self, ExecutionStatus.STARTED)
+            await execution_state.add_event(self, ExecutionStatus.STARTED)  # type: ignore[arg-type]
             
             # Enforce async handler
             if not asyncio.iscoroutinefunction(self.actor.handler):
@@ -173,9 +173,9 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
                 execution_state.storage.set_artifact(artifact_id, result)
                 execution_state.artifact_backend.save_artifact(artifact_id, result)
             
-            await execution_state.add_event(self, ExecutionStatus.COMPLETED)
+            await execution_state.add_event(self, ExecutionStatus.COMPLETED)  # type: ignore[arg-type]
             
-            execution_result = ExecutionResult[OutputT](
+            execution_result = ExecutionResult(
                 result=result,
                 execution_time=self.execution_time,
                 ok=True
@@ -190,8 +190,8 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
                     historical_result = None
                     if isinstance(historical_event, dict):
                         historical_result = historical_event.get('result')
-                    elif hasattr(historical_event, 'result'):
-                        historical_result = historical_event.result
+                    else:
+                        historical_result = getattr(historical_event, 'result', None)
                     
                     if historical_result is not None and historical_result != result:
                         print(f"WARNING: Validation mismatch at {current_address}")
@@ -204,8 +204,8 @@ class ExecutionEvent(BaseModel, Generic[OutputT]):
             # Stop timer, mark as failed and capture error message
             self.stop_timer()
             self.message = str(e)
-            await execution_state.add_event(self, ExecutionStatus.FAILED)
-            return ExecutionResult[OutputT](
+            await execution_state.add_event(self, ExecutionStatus.FAILED)  # type: ignore[arg-type]
+            return ExecutionResult(
                 result=None,
                 execution_time=self.execution_time,
                 ok=False,

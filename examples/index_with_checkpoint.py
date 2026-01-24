@@ -17,15 +17,20 @@ Next: See index_resume.py to restore this checkpoint and continue execution
 import asyncio
 from db import DOC_LIST, DOCS
 from rh_agents.agents import DoctrineReceverAgent, DoctrineTool, OmniAgent, OpenAILLM, ReviewerAgent, StepExecutorAgent
-from rh_agents.bus_handlers import EventPrinter
-from rh_agents.core.actors import Tool
-from rh_agents.core.result_types import Tool_Result
-from rh_agents.core.events import ExecutionEvent
-from rh_agents.core.execution import EventBus, ExecutionState
-from rh_agents.state_backends import FileSystemStateBackend, FileSystemArtifactBackend
-from rh_agents.core.state_recovery import StateStatus, StateMetadata
+from rh_agents import (
+    EventPrinter,
+    Tool,
+    Tool_Result,
+    ExecutionEvent,
+    ExecutionState,
+    FileSystemStateBackend,
+    FileSystemArtifactBackend,
+    StateStatus,
+    StateMetadata,
+    Message,
+    AuthorType
+)
 from pydantic import BaseModel, Field
-from rh_agents.models import AuthorType, Message
 
 
 class ListPecasArgs(BaseModel):
@@ -119,7 +124,7 @@ if __name__ == "__main__":
         print(f"🔄 Next: Run index_resume.py to restore and continue\n")
         
         # Execute the pipeline (EventPrinter subscriber handles all event printing)
-        result = await ExecutionEvent[Message](actor=omni_agent)(message, "", agent_execution_state)
+        result = await ExecutionEvent(actor=omni_agent)(message, "", agent_execution_state)
         
         print(f"\n{'═' * 80}")
         print(f"{'💾 SAVING CHECKPOINT':^80}")

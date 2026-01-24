@@ -2,12 +2,15 @@
 Quick resume example - shows smart replay with automatic skipping
 """
 import asyncio
-from rh_agents.core.execution import ExecutionState, EventBus
-from rh_agents.core.events import ExecutionEvent
-from rh_agents.models import Message
+from rh_agents import (
+    ExecutionState,
+    ExecutionEvent,
+    Message,
+    FileSystemStateBackend,
+    FileSystemArtifactBackend,
+    ReplayMode
+)
 from rh_agents.core.actors import Actor
-from rh_agents.state_backends import FileSystemStateBackend, FileSystemArtifactBackend
-from rh_agents.core.state_recovery import ReplayMode
 import os
 from datetime import datetime
 
@@ -102,7 +105,7 @@ async def main():
     
     print("🔹 Step 1: SimpleActor")
     start = datetime.now()
-    result1 = await ExecutionEvent[Message](actor=simple_actor)(
+    result1 = await ExecutionEvent(actor=simple_actor)(
         message, "", agent_execution_state
     )
     duration1 = (datetime.now() - start).total_seconds()
@@ -116,7 +119,7 @@ async def main():
     
     print("\n🔹 Step 2: ProcessorActor")
     start = datetime.now()
-    result2 = await ExecutionEvent[Message](actor=processor_actor)(
+    result2 = await ExecutionEvent(actor=processor_actor)(
         result1, "", agent_execution_state
     )
     duration2 = (datetime.now() - start).total_seconds()
@@ -129,7 +132,7 @@ async def main():
     
     print("\n🔹 Step 3: FinalActor (NEW - not in checkpoint)")
     start = datetime.now()
-    result3 = await ExecutionEvent[Message](actor=final_actor)(
+    result3 = await ExecutionEvent(actor=final_actor)(
         result2, "", agent_execution_state
     )
     duration3 = (datetime.now() - start).total_seconds()

@@ -1,5 +1,16 @@
-from typing import Union, Any
+from typing import Union, Any, Protocol, runtime_checkable
 from pydantic import BaseModel, Field
+
+@runtime_checkable
+class ActorOutput(Protocol):
+    """
+    Protocol for actor output types.
+    
+    All actor result types should implement this protocol
+    to enable generic code while maintaining domain-specific fields.
+    """
+    success: bool
+    error: str | None
 
 class LLM_Tool_Call(BaseModel):
     """Model representing a tool call made by an LLM"""
@@ -7,7 +18,11 @@ class LLM_Tool_Call(BaseModel):
     arguments: str
 
 class LLM_Result(BaseModel):
-    """Result type for LLM actor executions"""
+    """
+    Result type for LLM actor executions.
+    
+    Implements ActorOutput protocol.
+    """
     content: str
     tools: list[LLM_Tool_Call] = Field(default_factory=list)
     tokens_used: Union[int, None] = None
@@ -24,19 +39,29 @@ class LLM_Result(BaseModel):
     
     @property
     def succeeded(self) -> bool:
+        """Alias for protocol compatibility."""
         return self.error_message is None
+    
+    @property
+    def success(self) -> bool:
+        """Protocol implementation."""
+        return self.error_message is None
+    
+    @property
+    def error(self) -> str | None:
+        """Protocol implementation."""
+        return self.error_message
 
 class Tool_Result(BaseModel):
-    """Result type for Tool actor executions"""
+    """
+    Result type for Tool actor executions.
+    
+    Implements ActorOutput protocol.
+    """
     output: Any
     tool_name: str
     success: bool = True
-
-class Agent_Result(BaseModel):
-    """Result type for Agent actor executions"""
-    response: Any
-    agent_name: str
-    sub_tasks_completed: list[str] = Field(default_factory=list)
+    error: str | None = None
     
     
     

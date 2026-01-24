@@ -118,9 +118,10 @@ class EventBus(BaseModel):
         self.events.append(event)
 
         for handler in self.subscribers:
+            model_copy_fn = getattr(event, "model_copy", None)
             event_copy = (
-                event.model_copy()
-                if hasattr(event, "model_copy")
+                model_copy_fn()
+                if model_copy_fn is not None
                 else event
             )
 
@@ -153,41 +154,10 @@ class ExecutionState(BaseModel):
     history: HistorySet = Field(default_factory=HistorySet)
     execution_stack: list[str] = Field(default_factory=list, description="Stack tracking current execution path (agent/tool names)")
     
-    # Runtime components (not serialized, stored as plain attributes)
+    # Runtime components (excluded from serialization)
     event_bus: EventBus = Field(default_factory=EventBus, exclude=True)
-    
-    def __init__(
-        self, 
-        state_backend: Optional["StateBackend"] = None,
-        artifact_backend: Optional["ArtifactBackend"] = None,
-        **data
-    ):
-        """Initialize ExecutionState with backends."""
-        super().__init__(**data)
-        # Store backends as instance attributes (not Pydantic fields)
-        self._state_backend = state_backend
-        self._artifact_backend = artifact_backend
-    
-    @property
-    def state_backend(self) -> Optional["StateBackend"]:
-        """Get the state backend instance."""
-        return getattr(self, '_state_backend', None)
-    
-    @state_backend.setter
-    def state_backend(self, value: Optional["StateBackend"]):
-        """Set the state backend instance."""
-        self._state_backend = value
-    
-    @property
-    def artifact_backend(self) -> Optional["ArtifactBackend"]:
-        """Get the artifact backend instance."""
-        return getattr(self, '_artifact_backend', None)
-    
-    @artifact_backend.setter
-    def artifact_backend(self, value: Optional["ArtifactBackend"]):
-        """Set the artifact backend instance."""
-        self._artifact_backend = value
-    
+    state_backend: Any = Field(default=None, exclude=True)  # StateBackend at runtime
+    artifact_backend: Any = Field(default=None, exclude=True)  # ArtifactBackend at runtime
     
     def get_current_address(self, event_type: EventType) -> str:
         """Build address from execution stack + event type, e.g. 'doctrine_agent::tool_call'"""
@@ -301,7 +271,7 @@ class ExecutionState(BaseModel):
             error_strategy = ErrorStrategy.FAIL_SLOW
         
         return ParallelExecutionManager(
-            execution_state=self,
+            execution_state=self,  # type: ignore[arg-type]
             max_workers=max_workers,
             error_strategy=error_strategy,
             timeout=timeout,
@@ -461,8 +431,8 @@ class ExecutionState(BaseModel):
         
         # Reconstruct runtime components
         state.event_bus = event_bus or EventBus()
-        state._state_backend = state_backend
-        state._artifact_backend = artifact_backend
+        state.state_backend = state_backend
+        state.artifact_backend = artifact_backend
         state.replay_mode = replay_mode
         state.resume_from_address = resume_from_address
         

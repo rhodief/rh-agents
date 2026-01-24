@@ -58,7 +58,7 @@ async def test_doctrine_artifact_workflow():
     print("📝 Test 1: First Execution (creates Doctrine artifact)")
     print("-" * 70)
     
-    event1 = ExecutionEvent[MockDoctrine](actor=doctrine_agent)
+    event1 = ExecutionEvent(actor=doctrine_agent)
     user_input = Message(content="Create legal report", author=AuthorType.USER)
     
     import time
@@ -76,7 +76,7 @@ async def test_doctrine_artifact_workflow():
     print("📝 Test 2: Second Execution (retrieves from artifact storage)")
     print("-" * 70)
     
-    event2 = ExecutionEvent[MockDoctrine](actor=doctrine_agent)
+    event2 = ExecutionEvent(actor=doctrine_agent)
     
     start = time.time()
     result2 = await event2(user_input, "", execution_state)
@@ -113,7 +113,7 @@ async def test_doctrine_artifact_workflow():
     print("📝 Test 3: Different Input (creates new artifact)")
     print("-" * 70)
     
-    event3 = ExecutionEvent[MockDoctrine](actor=doctrine_agent)
+    event3 = ExecutionEvent(actor=doctrine_agent)
     different_input = Message(content="Analyze contract", author=AuthorType.USER)
     
     result3 = await event3(different_input, "", execution_state)

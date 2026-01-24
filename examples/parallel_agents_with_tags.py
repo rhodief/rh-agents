@@ -13,10 +13,7 @@ import asyncio
 from typing import Optional
 from pydantic import BaseModel, Field
 
-from rh_agents.core.execution import ExecutionState
-from rh_agents.core.events import ExecutionEvent
-from rh_agents.core.types import EventType
-from rh_agents.core.actors import BaseActor
+from rh_agents import ExecutionState, ExecutionEvent, EventType, BaseActor
 from rh_agents.bus_handlers import ParallelEventPrinter
 
 
@@ -236,7 +233,7 @@ async def example_1_parallel_with_tags_realtime():
     async with state.parallel(max_workers=3, name="Review Analysis") as p:
         for idx, review_text in enumerate(reviews):
             # Create ExecutionEvent with custom tag
-            event = ExecutionEvent[SentimentResult](
+            event = ExecutionEvent(
                 actor=sentiment_agent,
                 tag=f"review_{idx+1}"  # Custom tag to identify each review
             )
@@ -302,7 +299,7 @@ async def example_2_parallel_mixed_agents_progress():
     async with state.parallel(max_workers=5, name="Document Processing") as p:
         # Sentiment analysis tasks
         for i in range(3):
-            event = ExecutionEvent[SentimentResult](
+            event = ExecutionEvent(
                 actor=sentiment_agent,
                 tag=f"sentiment_doc_{i+1}"
             )
@@ -311,7 +308,7 @@ async def example_2_parallel_mixed_agents_progress():
         
         # Translation tasks
         for lang in ["es", "fr", "de"]:
-            event = ExecutionEvent[TranslationResult](
+            event = ExecutionEvent(
                 actor=translation_agent,
                 tag=f"translate_{lang}"
             )
@@ -320,7 +317,7 @@ async def example_2_parallel_mixed_agents_progress():
         
         # Summarization tasks
         for max_words in [20, 30, 40]:
-            event = ExecutionEvent[SummaryResult](
+            event = ExecutionEvent(
                 actor=summary_agent,
                 tag=f"summary_{max_words}w"
             )
@@ -384,7 +381,7 @@ async def example_3_custom_address_hierarchy():
                 priority = "high" if idx == 0 else "normal"
                 tag = f"{category}::{priority}"
                 
-                event = ExecutionEvent[SentimentResult](
+                event = ExecutionEvent(
                     actor=sentiment_agent,
                     tag=tag  # Hierarchical tag for organized addresses
                 )
@@ -444,7 +441,7 @@ async def example_4_streaming_with_tags():
     # Execute translations in parallel
     async with state.parallel(max_workers=2, name="Multi-Language Translation") as p:
         for lang_code, lang_name in target_languages:
-            event = ExecutionEvent[TranslationResult](
+            event = ExecutionEvent(
                 actor=translation_agent,
                 tag=f"lang_{lang_code}"  # Tag by language
             )

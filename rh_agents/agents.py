@@ -30,7 +30,7 @@ class StepResult(BaseModel):
     step_index: int
     result: ExecutionResult[str]
 
-class OpenAILLM(LLM[OpenAIRequest]):
+class OpenAILLM(LLM):
     """OpenAI LLM Actor with function calling support"""
     
     def __init__(
@@ -62,11 +62,14 @@ class DoctrineTool(Tool):
         O índice de cada passo deve ser único e sequencial, começando em 0.
         '''
         
+        async def doctrine_handler(args: Doctrine, context: str, state: ExecutionState) -> Doctrine:
+            return args
+        
         super().__init__(
             name="DoctrineTool",
             description=DOCTRINE_TOOL_PROMPT,
             input_model=Doctrine,
-            handler=lambda args: args,
+            handler=doctrine_handler,
             cacheable=True            
         )
 
@@ -100,7 +103,7 @@ class DoctrineReceverAgent(Agent):
     '''
     
         async def handler(input_data: Message, context: str, execution_state: ExecutionState) -> Union[Doctrine, Message]:
-            llm_event = ExecutionEvent[llm.output_model](
+            llm_event = ExecutionEvent(
                 actor=llm
             )            
             # Execute LLM to parse the user input into a Doctrine
@@ -110,7 +113,7 @@ class DoctrineReceverAgent(Agent):
                 model=MODEL,
                 max_completion_tokens=MAX_TOKENS,
                 temperature=1,
-                tools=ToolSet(tools if tools else []),
+                tools=ToolSet(tools=tools if tools else []),
                 tool_choice={"type": "function", "function": {"name": "DoctrineTool"}}
             )
             execution_result = await llm_event(llm_input, context, execution_state)
@@ -135,7 +138,7 @@ class DoctrineReceverAgent(Agent):
             handler=handler,
             event_type=EventType.AGENT_CALL,
             llm=llm,
-            tools=ToolSet(tools) if tools else ToolSet(),
+            tools=ToolSet(tools=tools) if tools else ToolSet(tools=[]),
             is_artifact=True,
             cacheable=True
         )
@@ -150,9 +153,9 @@ class StepExecutorAgent(Agent):
             Execute o passo fornecido de acordo com o plano de execução e o objetivo geral.
             Se você já tiver informações necessárias em seu contexto, não chame ferramentas desnecessariamente.
             '''
-        tool_set = ToolSet(tools) if tools else ToolSet()
+        tool_set = ToolSet(tools=tools) if tools else ToolSet(tools=[])
         async def handler(input_data: DoctrineStep, context: str, execution_state: ExecutionState) -> StepResult:
-            llm_event = ExecutionEvent[llm.output_model](
+            llm_event = ExecutionEvent(
                 actor=llm
             )           
             # Retrieve dependencies from the datastore (execution_state)
@@ -197,7 +200,7 @@ class StepExecutorAgent(Agent):
                             errors.append(f"Tool '{tool_call.tool_name}' execution failed: {tool_result.erro_message}")
                         else:
                             # Extract the output from Tool_Result
-                            output = tool_result.result.output if hasattr(tool_result.result, 'output') else tool_result.result
+                            output = getattr(tool_result.result, 'output', tool_result.result)
                             all_outputs.append(str(output))
                     except Exception as e:
                         errors.append(f"Error in {tool_call.tool_name}: {str(e)}")
@@ -208,6 +211,8 @@ class StepExecutorAgent(Agent):
                 return StepResult(
                     step_index=input_data.index,
                     result=ExecutionResult[str](
+                        result=None,
+                        execution_time=None,
                         ok=False,
                         erro_message="; ".join(errors)
                     )
@@ -221,7 +226,9 @@ class StepExecutorAgent(Agent):
                 step_index=input_data.index,
                 result=ExecutionResult[str](
                     result=combined_output,
-                    ok=True
+                    execution_time=None,
+                    ok=True,
+                    erro_message=None
                 )
             )
         
@@ -233,7 +240,7 @@ class StepExecutorAgent(Agent):
             handler=handler,
             event_type=EventType.AGENT_CALL,
             llm=llm,
-            tools=ToolSet(tools) if tools else ToolSet()
+            tools=ToolSet(tools=tools) if tools else ToolSet(tools=[])
         )
 
 
@@ -248,10 +255,10 @@ class ReviewerAgent(Agent):
             Sintetize as informações coletadas e apresente um relatório coeso ao usuário.
             Use linguagem clara e técnica apropriada ao contexto jurídico.
             '''
-        tool_set = ToolSet(tools) if tools else ToolSet()
+        tool_set = ToolSet(tools=tools) if tools else ToolSet(tools=[])
         
         async def handler(input_data: Doctrine, context: str, execution_state: ExecutionState) -> Message:
-            llm_event = ExecutionEvent[llm.output_model](
+            llm_event = ExecutionEvent(
                 actor=llm
             )
             
@@ -305,7 +312,7 @@ class ReviewerAgent(Agent):
             handler=handler,
             event_type=EventType.AGENT_CALL,
             llm=llm,
-            tools=ToolSet(tools) if tools else ToolSet()
+            tools=ToolSet(tools=tools) if tools else ToolSet(tools=[])
         )
 
 class OmniAgent(Agent):
@@ -317,7 +324,7 @@ class OmniAgent(Agent):
         
         
         async def handler(input_data: Message, context: str, execution_state: ExecutionState) -> Message:
-            result = await ExecutionEvent[Union[Doctrine, Message]](actor=receiver_agent)(input_data, "", execution_state)
+            result = await ExecutionEvent(actor=receiver_agent)(input_data, "", execution_state)
             if not result.ok or result.result is None:
                 raise Exception(f"Agent execution failed: {result.erro_message}")
             if isinstance(result.result, Message):
@@ -330,7 +337,7 @@ class OmniAgent(Agent):
                 #context = f'Goal: {doctrine.goal}\nGuidelines: {doctrine.guidelines}\nConstraints: {doctrine.constraints}'
                 context = ''
                 # Execute step - the handler will retrieve dependencies from execution_state
-                step_result = await ExecutionEvent[StepResult](actor=step_executor_agent, tag=f'step_{step.index}-{len(doctrine.steps) - 1}')(step, context, execution_state)
+                step_result = await ExecutionEvent(actor=step_executor_agent, tag=f'step_{step.index}-{len(doctrine.steps) - 1}')(step, context, execution_state)
                 if not step_result.ok or step_result.result is None:
                     raise Exception(f"Step execution failed: {step_result.erro_message}")
                 execution_state.add_step_result(step.index, step_result.result)
@@ -340,7 +347,7 @@ class OmniAgent(Agent):
             print("🔍 Iniciando Revisão Final...")
             print("═" * 60 + "\n")
             
-            review_result = await ExecutionEvent[Message](actor=reviewer_agent, tag='final_review')(doctrine, '', execution_state)
+            review_result = await ExecutionEvent(actor=reviewer_agent, tag='final_review')(doctrine, '', execution_state)
             if not review_result.ok or review_result.result is None:
                 raise Exception(f"Review execution failed: {review_result.erro_message}")
             
@@ -361,5 +368,6 @@ class OmniAgent(Agent):
             output_model=Message,
             handler=handler,
             event_type=EventType.AGENT_CALL,
-            tools=ToolSet([])
+            tools=ToolSet(tools=[]),
+            llm=None
         )

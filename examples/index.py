@@ -4,6 +4,8 @@ from rh_agents.agents import DoctrineReceverAgent, DoctrineTool, OmniAgent, Open
 from rh_agents import EventPrinter, Tool, Tool_Result, ExecutionEvent, ExecutionState, Message, AuthorType
 from pydantic import BaseModel, Field
 
+from rh_agents.core.execution import EventBus
+
 
 
 class ListPecasArgs(BaseModel):

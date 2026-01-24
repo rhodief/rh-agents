@@ -155,7 +155,7 @@ def validate_state(state: ExecutionState) -> None:
         # Verify address exists in history
         if not any(
             (isinstance(e, dict) and e.get('address') == state.resume_from_address) or
-            (hasattr(e, 'address') and e.address == state.resume_from_address)
+            (getattr(e, 'address', None) == state.resume_from_address)
             for e in state.history.get_event_list()
         ):
             errors.append(f"resume_from_address '{state.resume_from_address}' not found in history")

@@ -137,7 +137,7 @@ def agent(
             name=agent_name,
             description=agent_description,
             input_model=input_model,
-            output_model=output_model,
+            output_model=output_model,  # type: ignore[arg-type]
             handler=handler,
             tools=ToolSet(tools=tools or []),
             llm=llm,

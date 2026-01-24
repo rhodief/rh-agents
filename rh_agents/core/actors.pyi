@@ -1,7 +1,8 @@
-from typing import TypeVar, Generic, Awaitable, Callable
+from typing import TypeVar, Generic, Awaitable, Callable, Any
 from pydantic import BaseModel
 from rh_agents.core.execution import ExecutionState
 from rh_agents.core.result_types import LLM_Result
+from rh_agents.core.types import EventType
 
 T = TypeVar('T', bound=BaseModel)
 R = TypeVar('R')
@@ -19,6 +20,9 @@ class BaseActor:
     version: str
     cache_ttl: int | None
     is_artifact: bool
+    
+    async def run_preconditions(self, input_data: Any, extra_context: str, execution_state: ExecutionState) -> None: ...
+    async def run_postconditions(self, result: Any, extra_context: str, execution_state: ExecutionState) -> None: ...
 
 class LLM(BaseActor, Generic[T, R]):
     def __init__(

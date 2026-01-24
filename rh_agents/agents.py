@@ -62,11 +62,14 @@ class DoctrineTool(Tool):
         O índice de cada passo deve ser único e sequencial, começando em 0.
         '''
         
+        async def doctrine_handler(args: Doctrine, context: str, state: ExecutionState) -> Doctrine:
+            return args
+        
         super().__init__(
             name="DoctrineTool",
             description=DOCTRINE_TOOL_PROMPT,
             input_model=Doctrine,
-            handler=lambda args: args,
+            handler=doctrine_handler,
             cacheable=True            
         )
 
@@ -110,7 +113,7 @@ class DoctrineReceverAgent(Agent):
                 model=MODEL,
                 max_completion_tokens=MAX_TOKENS,
                 temperature=1,
-                tools=ToolSet(tools if tools else []),
+                tools=ToolSet(tools=tools if tools else []),
                 tool_choice={"type": "function", "function": {"name": "DoctrineTool"}}
             )
             execution_result = await llm_event(llm_input, context, execution_state)
@@ -135,7 +138,7 @@ class DoctrineReceverAgent(Agent):
             handler=handler,
             event_type=EventType.AGENT_CALL,
             llm=llm,
-            tools=ToolSet(tools) if tools else ToolSet(),
+            tools=ToolSet(tools=tools) if tools else ToolSet(tools=[]),
             is_artifact=True,
             cacheable=True
         )
@@ -150,7 +153,7 @@ class StepExecutorAgent(Agent):
             Execute o passo fornecido de acordo com o plano de execução e o objetivo geral.
             Se você já tiver informações necessárias em seu contexto, não chame ferramentas desnecessariamente.
             '''
-        tool_set = ToolSet(tools) if tools else ToolSet()
+        tool_set = ToolSet(tools=tools) if tools else ToolSet(tools=[])
         async def handler(input_data: DoctrineStep, context: str, execution_state: ExecutionState) -> StepResult:
             llm_event = ExecutionEvent(
                 actor=llm
@@ -197,7 +200,7 @@ class StepExecutorAgent(Agent):
                             errors.append(f"Tool '{tool_call.tool_name}' execution failed: {tool_result.erro_message}")
                         else:
                             # Extract the output from Tool_Result
-                            output = tool_result.result.output if hasattr(tool_result.result, 'output') else tool_result.result
+                            output = getattr(tool_result.result, 'output', tool_result.result)
                             all_outputs.append(str(output))
                     except Exception as e:
                         errors.append(f"Error in {tool_call.tool_name}: {str(e)}")
@@ -207,7 +210,9 @@ class StepExecutorAgent(Agent):
             if errors and not all_outputs:
                 return StepResult(
                     step_index=input_data.index,
-                    result=ExecutionResult(
+                    result=ExecutionResult[str](
+                        result=None,
+                        execution_time=None,
                         ok=False,
                         erro_message="; ".join(errors)
                     )
@@ -219,9 +224,11 @@ class StepExecutorAgent(Agent):
             
             return StepResult(
                 step_index=input_data.index,
-                result=ExecutionResult(
+                result=ExecutionResult[str](
                     result=combined_output,
-                    ok=True
+                    execution_time=None,
+                    ok=True,
+                    erro_message=None
                 )
             )
         
@@ -233,7 +240,7 @@ class StepExecutorAgent(Agent):
             handler=handler,
             event_type=EventType.AGENT_CALL,
             llm=llm,
-            tools=ToolSet(tools) if tools else ToolSet()
+            tools=ToolSet(tools=tools) if tools else ToolSet(tools=[])
         )
 
 
@@ -248,7 +255,7 @@ class ReviewerAgent(Agent):
             Sintetize as informações coletadas e apresente um relatório coeso ao usuário.
             Use linguagem clara e técnica apropriada ao contexto jurídico.
             '''
-        tool_set = ToolSet(tools) if tools else ToolSet()
+        tool_set = ToolSet(tools=tools) if tools else ToolSet(tools=[])
         
         async def handler(input_data: Doctrine, context: str, execution_state: ExecutionState) -> Message:
             llm_event = ExecutionEvent(
@@ -305,7 +312,7 @@ class ReviewerAgent(Agent):
             handler=handler,
             event_type=EventType.AGENT_CALL,
             llm=llm,
-            tools=ToolSet(tools) if tools else ToolSet()
+            tools=ToolSet(tools=tools) if tools else ToolSet(tools=[])
         )
 
 class OmniAgent(Agent):
@@ -361,5 +368,6 @@ class OmniAgent(Agent):
             output_model=Message,
             handler=handler,
             event_type=EventType.AGENT_CALL,
-            tools=ToolSet(tools=[])
+            tools=ToolSet(tools=[]),
+            llm=None
         )

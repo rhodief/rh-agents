@@ -122,7 +122,7 @@ class AgentBuilder:
             name=self._name,
             description=self._description,
             input_model=self._input_model,
-            output_model=self._output_model,
+            output_model=self._output_model,  # type: ignore[arg-type]
             handler=self._handler,
             tools=ToolSet(tools=self._tools),
             llm=self._llm,

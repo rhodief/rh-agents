@@ -118,9 +118,10 @@ class EventBus(BaseModel):
         self.events.append(event)
 
         for handler in self.subscribers:
+            model_copy_fn = getattr(event, "model_copy", None)
             event_copy = (
-                event.model_copy()
-                if hasattr(event, "model_copy")
+                model_copy_fn()
+                if model_copy_fn is not None
                 else event
             )
 
@@ -270,7 +271,7 @@ class ExecutionState(BaseModel):
             error_strategy = ErrorStrategy.FAIL_SLOW
         
         return ParallelExecutionManager(
-            execution_state=self,
+            execution_state=self,  # type: ignore[arg-type]
             max_workers=max_workers,
             error_strategy=error_strategy,
             timeout=timeout,
@@ -430,8 +431,8 @@ class ExecutionState(BaseModel):
         
         # Reconstruct runtime components
         state.event_bus = event_bus or EventBus()
-        state._state_backend = state_backend
-        state._artifact_backend = artifact_backend
+        state.state_backend = state_backend
+        state.artifact_backend = artifact_backend
         state.replay_mode = replay_mode
         state.resume_from_address = resume_from_address
         

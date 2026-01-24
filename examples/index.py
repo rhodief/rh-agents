@@ -72,10 +72,6 @@ if __name__ == "__main__":
     bus.subscribe(printer)  # Use the beautiful printer
     agent_execution_state = ExecutionState(event_bus=bus)
     
-    async def streamer():
-        async for event in bus.stream():
-            pass  # Events already printed by subscriber
-    
     omni_agent = OmniAgent(
         receiver_agent=doctrine_receiver_agent,
         step_executor_agent=step_executor_agent,
@@ -88,10 +84,7 @@ if __name__ == "__main__":
         print(f"{'🚀 EXECUTION STARTED':^60}")
         print(f"{'═' * 60}\n")
         
-        await asyncio.gather(
-            ExecutionEvent[Message](actor=omni_agent)(message, "", agent_execution_state),
-            streamer()        
-        )
+        result = await ExecutionEvent[Message](actor=omni_agent)(message, "", agent_execution_state)
         
         print(f"\n{'═' * 60}")
         print(f"{'✅ EXECUTION FINISHED':^60}")
@@ -99,6 +92,8 @@ if __name__ == "__main__":
         
         # Print summary statistics
         printer.print_summary()
+        print("Final Result:")
+        print(result.result)
     
     asyncio.run(main())
         

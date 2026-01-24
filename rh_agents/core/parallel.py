@@ -337,10 +337,16 @@ class ParallelExecutionManager:
         self._circuit_failures = 0
         self._circuit_opened_at: Optional[float] = None
         self._circuit_lock = asyncio.Lock()
+        
+        # Save the base execution stack to isolate parallel tasks
+        # Each parallel task will reset to this base stack before executing
+        self._base_execution_stack: list[str] = []
     
     async def __aenter__(self):
         """Enter async context manager - mark group as started."""
         self.group.mark_started()
+        # Capture the current execution stack as the base for all parallel tasks
+        self._base_execution_stack = self.execution_state.execution_stack.copy()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -469,79 +475,91 @@ class ParallelExecutionManager:
                     execution_time=None
                 )
             
-            # Check if it's a callable or a coroutine
-            is_callable = callable(coro_or_callable) and not inspect.iscoroutine(coro_or_callable)
+            # Reset execution stack to the base state before this parallel block
+            # This isolates each parallel task's context from other concurrent tasks
+            self.execution_state.execution_stack = self._base_execution_stack.copy()
             
-            # Retry logic
-            last_exception = None
-            for attempt in range(self.max_retries + 1):
-                try:
-                    # Get the coroutine for this attempt
-                    if is_callable:
-                        coro = coro_or_callable()
-                    else:
-                        # For direct coroutines, we can only execute once
-                        if attempt > 0:
-                            raise RuntimeError(
-                                "Cannot retry a direct coroutine. Pass a callable (lambda/function) "
-                                "that returns a coroutine to enable retries."
+            try:
+                # Check if it's a callable or a coroutine
+                is_callable = callable(coro_or_callable) and not inspect.iscoroutine(coro_or_callable)
+                
+                # Retry logic
+                last_exception = None
+                for attempt in range(self.max_retries + 1):
+                    try:
+                        # Get the coroutine for this attempt
+                        if is_callable:
+                            # Type narrowing: if is_callable, it's a Callable
+                            assert callable(coro_or_callable)
+                            coro = coro_or_callable()  # type: ignore[operator]
+                        else:
+                            # For direct coroutines, we can only execute once
+                            if attempt > 0:
+                                raise RuntimeError(
+                                    "Cannot retry a direct coroutine. Pass a callable (lambda/function) "
+                                    "that returns a coroutine to enable retries."
+                                )
+                            # Type narrowing: if not callable, it's an Awaitable
+                            coro = coro_or_callable  # type: ignore[assignment]
+                        
+                        result = await coro  # type: ignore[misc]
+                        
+                        # Success - record for circuit breaker
+                        await self._record_circuit_success()
+                        
+                        # Wrap result in ExecutionResult if not already
+                        if isinstance(result, ExecutionResult):
+                            return result
+                        else:
+                            return ExecutionResult(
+                                result=result,
+                                ok=True,
+                                execution_time=None
                             )
-                        coro = coro_or_callable
-                    
-                    result = await coro
-                    
-                    # Success - record for circuit breaker
-                    await self._record_circuit_success()
-                    
-                    # Wrap result in ExecutionResult if not already
-                    if isinstance(result, ExecutionResult):
-                        return result
-                    else:
+                            
+                    except Exception as e:
+                        last_exception = e
+                        
+                        # Record failure for circuit breaker
+                        await self._record_circuit_failure()
+                        
+                        # Check if we should retry
+                        if attempt < self.max_retries:
+                            # Calculate exponential backoff delay
+                            delay = self.retry_delay * (2 ** attempt)
+                            await asyncio.sleep(delay)
+                            continue
+                        
+                        # No more retries - handle error
+                        error_msg = f"Task {index} ({name or 'unnamed'}): {str(e)}"
+                        if self.max_retries > 0:
+                            error_msg += f" (failed after {self.max_retries + 1} attempts)"
+                        
+                        self.group.add_error(error_msg)
+                        
+                        # For fail-fast, re-raise immediately
+                        if self.error_strategy == ErrorStrategy.FAIL_FAST:
+                            raise
+                        
+                        # For fail-slow, wrap error in ExecutionResult
                         return ExecutionResult(
-                            result=result,
-                            ok=True,
+                            result=None,
+                            ok=False,
+                            erro_message=str(e),
                             execution_time=None
                         )
-                        
-                except Exception as e:
-                    last_exception = e
-                    
-                    # Record failure for circuit breaker
-                    await self._record_circuit_failure()
-                    
-                    # Check if we should retry
-                    if attempt < self.max_retries:
-                        # Calculate exponential backoff delay
-                        delay = self.retry_delay * (2 ** attempt)
-                        await asyncio.sleep(delay)
-                        continue
-                    
-                    # No more retries - handle error
-                    error_msg = f"Task {index} ({name or 'unnamed'}): {str(e)}"
-                    if self.max_retries > 0:
-                        error_msg += f" (failed after {self.max_retries + 1} attempts)"
-                    
-                    self.group.add_error(error_msg)
-                    
-                    # For fail-fast, re-raise immediately
-                    if self.error_strategy == ErrorStrategy.FAIL_FAST:
-                        raise
-                    
-                    # For fail-slow, wrap error in ExecutionResult
-                    return ExecutionResult(
-                        result=None,
-                        ok=False,
-                        erro_message=str(e),
-                        execution_time=None
-                    )
-            
-            # Should never reach here, but handle it
-            return ExecutionResult(
-                result=None,
-                ok=False,
-                erro_message=str(last_exception) if last_exception else "Unknown error",
-                execution_time=None
-            )
+                
+                # Should never reach here, but handle it
+                return ExecutionResult(
+                    result=None,
+                    ok=False,
+                    erro_message=str(last_exception) if last_exception else "Unknown error",
+                    execution_time=None
+                )
+            finally:
+                # Restore execution stack to base state after task completes
+                # This ensures the stack is clean for the next parallel task
+                self.execution_state.execution_stack = self._base_execution_stack.copy()
     
     async def gather(self) -> list["ExecutionResult"]:
         """

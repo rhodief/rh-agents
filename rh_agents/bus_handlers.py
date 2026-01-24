@@ -7,9 +7,12 @@
 import asyncio
 import json
 from collections.abc import Callable
-from typing import AsyncGenerator, Optional, Any
+from typing import AsyncGenerator, Optional, Any, TYPE_CHECKING
 from rh_agents.core.events import ExecutionEvent
 from rh_agents.core.types import EventType, ExecutionStatus
+
+if TYPE_CHECKING:
+    from rh_agents.core.parallel import ParallelGroupTracker
 
 
 class EventPrinter:
@@ -292,6 +295,10 @@ class ParallelEventPrinter(EventPrinter):
         """Handle parallel execution events."""
         group_id = event.group_id
         
+        # Type narrowing: group_id should not be None here due to earlier check
+        if group_id is None:
+            return
+        
         # Initialize group tracker if needed
         if group_id not in self.parallel_groups:
             self._initialize_group(event)
@@ -327,6 +334,10 @@ class ParallelEventPrinter(EventPrinter):
     def _initialize_group(self, event: ExecutionEvent):
         """Initialize tracking for a new parallel group."""
         group_id = event.group_id
+        
+        # Type narrowing: group_id should not be None when this is called
+        if group_id is None:
+            return
         
         # Create tracker - we'll set total later when we know it
         tracker = self.ParallelGroupTracker(
@@ -460,8 +471,11 @@ class ParallelEventPrinter(EventPrinter):
         percentage = (completed / total) * 100
         
         # Calculate elapsed time
-        elapsed = asyncio.get_event_loop().time() - tracker.start_time
-        elapsed_str = self._format_time(elapsed)
+        if tracker.start_time is None:
+            elapsed_str = "0s"
+        else:
+            elapsed = asyncio.get_event_loop().time() - tracker.start_time
+            elapsed_str = self._format_time(elapsed)
         
         # Build progress bar components
         group_name = tracker.name or "Parallel Group"
@@ -502,8 +516,11 @@ class ParallelEventPrinter(EventPrinter):
     
     def _print_group_summary(self, tracker: "ParallelGroupTracker"):
         """Print summary when parallel group completes."""
-        elapsed = asyncio.get_event_loop().time() - tracker.start_time
-        elapsed_str = self._format_time(elapsed)
+        if tracker.start_time is None:
+            elapsed_str = "0s"
+        else:
+            elapsed = asyncio.get_event_loop().time() - tracker.start_time
+            elapsed_str = self._format_time(elapsed)
         
         total = tracker.completed + tracker.failed
         success_rate = (tracker.completed / total * 100) if total > 0 else 0

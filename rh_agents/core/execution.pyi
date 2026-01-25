@@ -1,5 +1,6 @@
-from typing import Any, Callable, Awaitable, TYPE_CHECKING
+from typing import Any, Callable, Awaitable, TYPE_CHECKING, Optional
 from pydantic import BaseModel
+from rh_agents.core.parallel import ErrorStrategy, ParallelExecutionManager
 from rh_agents.core.types import EventType, ExecutionStatus
 from rh_agents.core.state_recovery import ReplayMode
 
@@ -66,3 +67,14 @@ class ExecutionState(BaseModel):
     def get_steps_result(self, step_index: list[int]) -> list[Any]: ...
     def get_last_step_result(self) -> Any | None: ...
     def get_all_steps_results(self) -> dict[int, Any]: ...
+    def parallel(
+        self,
+        max_workers: int = 5,
+        error_strategy: Optional['ErrorStrategy'] = None,
+        timeout: Optional[float] = None,
+        name: Optional[str] = None,
+        max_retries: int = 0,
+        retry_delay: float = 1.0,
+        circuit_breaker_threshold: int = 5,
+        circuit_breaker_timeout: float = 60.0
+    ) -> 'ParallelExecutionManager':...

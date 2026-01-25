@@ -81,7 +81,7 @@ if __name__ == "__main__":
         print(f"{'🚀 EXECUTION STARTED':^60}")
         print(f"{'═' * 60}\n")
         
-        result = await ExecutionEvent(actor=omni_agent)(message, "", agent_execution_state)
+        result = await ExecutionEvent[Message](actor=omni_agent)(message, "", agent_execution_state)
         
         print(f"\n{'═' * 60}")
         print(f"{'✅ EXECUTION FINISHED':^60}")

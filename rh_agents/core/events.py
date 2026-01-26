@@ -16,7 +16,7 @@ class ExecutionResult(BaseModel, Generic[T]):
     ok: bool = Field(default=True, description="Indicates if the execution was successful")
     erro_message: Union[str, None] = Field(default=None, description="Error message if execution failed")
 
-class ExecutionEvent(BaseModel):
+class ExecutionEvent(BaseModel, Generic[T]):
     actor: BaseActor
     datetime: str = Field(default_factory=lambda: datetime.datetime.now().isoformat(), description="Timestamp of the event in milliseconds since epoch")
     address: str = Field(default="", description="Address of the agent triggering the event on exectution tree")
@@ -76,7 +76,7 @@ class ExecutionEvent(BaseModel):
     
 
     
-    async def __call__(self, input_data, extra_context, execution_state: ExecutionState) -> ExecutionResult:
+    async def __call__(self, input_data, extra_context, execution_state: ExecutionState) -> ExecutionResult[T]:
         """
         Execute the wrapped actor with replay awareness and state recovery support.
         

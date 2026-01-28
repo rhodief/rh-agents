@@ -9,7 +9,7 @@ import json
 from collections.abc import Callable
 from typing import AsyncGenerator, Optional, Any, TYPE_CHECKING
 from rh_agents.core.events import ExecutionEvent
-from rh_agents.core.types import EventType, ExecutionStatus
+from rh_agents.core.types import EventType, ExecutionStatus, InterruptEvent
 
 if TYPE_CHECKING:
     from rh_agents.core.parallel import ParallelGroupTracker
@@ -239,9 +239,53 @@ class EventPrinter:
         
         print(f"\n{self.BOLD}{self.CYAN}{'═' * 70}{self.RESET}\n")
     
-    def __call__(self, event: ExecutionEvent):
-        """Allow using the printer as a callback."""
-        self.print_event(event)
+    def print_interrupt(self, event: InterruptEvent):
+        """Print a beautifully formatted interrupt event."""
+        print(f"\n{self.RED}{self.BOLD}{'═' * 70}{self.RESET}")
+        print(f"{self.RED}{self.BOLD}{'🛑  EXECUTION INTERRUPTED':^70}{self.RESET}")
+        print(f"{self.RED}{self.BOLD}{'═' * 70}{self.RESET}\n")
+        
+        # Reason with icon
+        reason_icons = {
+            'user_cancelled': '👤',
+            'timeout': '⏰',
+            'resource_limit': '💾',
+            'error_escalation': '⚠️',
+            'priority_override': '⚡',
+            'custom': '🔧'
+        }
+        reason_value = event.signal.reason.value if hasattr(event.signal.reason, 'value') else str(event.signal.reason)
+        reason_icon = reason_icons.get(reason_value, '🛑')
+        
+        print(f"{self.BOLD}Reason:{self.RESET} {reason_icon} {self.YELLOW}{reason_value.upper().replace('_', ' ')}{self.RESET}")
+        
+        # Message (if provided)
+        if event.signal.message:
+            print(f"{self.BOLD}Message:{self.RESET} {event.signal.message}")
+        
+        # Triggered by (if provided)
+        if event.signal.triggered_by:
+            print(f"{self.BOLD}Triggered by:{self.RESET} {self.CYAN}{event.signal.triggered_by}{self.RESET}")
+        
+        # Timestamp
+        timestamp = event.signal.triggered_at[:19].replace('T', ' ') if len(event.signal.triggered_at) >= 19 else event.signal.triggered_at
+        print(f"{self.BOLD}Time:{self.RESET} {self.GRAY}{timestamp}{self.RESET}")
+        
+        # Checkpoint status
+        checkpoint_status = "✅ Saved" if event.signal.save_checkpoint else "❌ Not saved"
+        print(f"{self.BOLD}Checkpoint:{self.RESET} {checkpoint_status}")
+        
+        print(f"\n{self.RED}{self.BOLD}{'═' * 70}{self.RESET}\n")
+    
+    def __call__(self, event):
+        """Allow using the printer as a callback. Handles both ExecutionEvent and InterruptEvent."""
+        if isinstance(event, InterruptEvent):
+            self.print_interrupt(event)
+        elif isinstance(event, ExecutionEvent):
+            self.print_event(event)
+        else:
+            # Unknown event type, try to print basic info
+            print(f"{self.YELLOW}⚠️  Unknown event type: {type(event)}{self.RESET}")
 
 
 def create_event_handler(printer: EventPrinter | None = None) -> Callable:

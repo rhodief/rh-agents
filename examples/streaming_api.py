@@ -33,6 +33,10 @@ from rh_agents.agents import (
 from rh_agents import Tool, Tool_Result, ExecutionEvent, ExecutionState, Message, AuthorType
 from rh_agents import FileSystemStateBackend, FileSystemArtifactBackend
 from rh_agents.bus_handlers import EventStreamer
+from rh_agents.core.types import InterruptReason
+
+# Store active execution states for interrupt control
+active_executions: dict[str, ExecutionState] = {}
 
 
 # === Tool Definitions ===
@@ -125,6 +129,10 @@ async def stream_execution(request: QueryRequest):
     # Create execution state
     agent_execution_state = ExecutionState(event_bus=bus, state_backend=state_backend)
     
+    # Store execution state for interrupt control
+    execution_id = agent_execution_state.state_id
+    active_executions[execution_id] = agent_execution_state
+    
     # Create OmniAgent
     omni_agent = OmniAgent(
         receiver_agent=doctrine_receiver_agent,
@@ -136,9 +144,14 @@ async def stream_execution(request: QueryRequest):
     message = Message(content=request.query, author=AuthorType.USER)
     
     # Start execution task
-    execution_task = asyncio.create_task(
-        ExecutionEvent(actor=omni_agent)(message, "", agent_execution_state)
-    )
+    async def execute_and_cleanup():
+        try:
+            await ExecutionEvent(actor=omni_agent)(message, "", agent_execution_state)
+        finally:
+            # Cleanup execution state after completion
+            active_executions.pop(execution_id, None)
+    
+    execution_task = asyncio.create_task(execute_and_cleanup())
     
     # Return streaming response - streamer handles all the complexity!
     return StreamingResponse(
@@ -147,9 +160,72 @@ async def stream_execution(request: QueryRequest):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
+            "X-Accel-Buffering": "no",
+            "X-Execution-Id": execution_id  # Return execution ID for interrupt control
         }
     )
+
+
+@app.post("/api/interrupt/{execution_id}")
+async def interrupt_execution(execution_id: str):
+    """
+    Interrupt a running execution.
+    
+    Args:
+        execution_id: The execution state ID (returned in X-Execution-Id header from /api/stream)
+    
+    Returns:
+        Status of the interrupt request
+    """
+    from fastapi import HTTPException
+    
+    state = active_executions.get(execution_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Execution not found or already completed")
+    
+    # Request interrupt
+    state.request_interrupt(
+        reason=InterruptReason.USER_CANCELLED,
+        message="User requested interruption via API",
+        triggered_by="streaming_api",
+        save_checkpoint=True
+    )
+    
+    return {
+        "status": "interrupted",
+        "execution_id": execution_id,
+        "message": "Interrupt signal sent successfully"
+    }
+
+
+@app.get("/api/status/{execution_id}")
+async def check_execution_status(execution_id: str):
+    """
+    Check if an execution is still running and whether it's interrupted.
+    
+    Args:
+        execution_id: The execution state ID
+    
+    Returns:
+        Current status of the execution
+    """
+    from fastapi import HTTPException
+    
+    state = active_executions.get(execution_id)
+    if not state:
+        return {
+            "status": "not_found",
+            "execution_id": execution_id,
+            "message": "Execution not found or already completed"
+        }
+    
+    return {
+        "status": "running" if not state.is_interrupted() else "interrupted",
+        "execution_id": execution_id,
+        "is_interrupted": state.is_interrupted(),
+        "interrupt_reason": state.interrupt_signal.reason.value if state.interrupt_signal else None,
+        "interrupt_message": state.interrupt_signal.message if state.interrupt_signal else None
+    }
 
 
 @app.get("/health")

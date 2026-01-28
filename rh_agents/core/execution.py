@@ -212,6 +212,8 @@ class ExecutionState(BaseModel):
     interrupt_signal: Optional[InterruptSignal] = Field(default=None, exclude=True)
     interrupt_checker: Optional[InterruptChecker] = Field(default=None, exclude=True)
     active_generators: set[asyncio.Task] = Field(default_factory=set, exclude=True)
+    timeout_task: Optional[asyncio.Task] = Field(default=None, exclude=True)
+    timeout_seconds: Optional[float] = Field(default=None, exclude=True)
     
     def get_current_address(self, event_type: EventType) -> str:
         """Build address from execution stack + event type, e.g. 'doctrine_agent::tool_call'"""
@@ -786,3 +788,75 @@ class ExecutionState(BaseModel):
         
         # Clear the registry
         self.active_generators.clear()
+    
+    def set_timeout(
+        self,
+        timeout_seconds: float,
+        message: Optional[str] = None
+    ):
+        """
+        Set a timeout for execution. If execution exceeds this time,
+        an automatic interrupt will be triggered.
+        
+        This is a convenience method that automatically triggers
+        `request_interrupt()` after the specified duration.
+        
+        Args:
+            timeout_seconds: Maximum execution time in seconds
+            message: Optional custom timeout message
+        
+        Example:
+            # Set 5-minute timeout
+            state = ExecutionState()
+            state.set_timeout(300, "Processing must complete within 5 minutes")
+            
+            # Execute agent
+            result = await ExecutionEvent(actor=agent)(input_data, "", state)
+            
+            # Cleanup timeout if execution completes normally
+            state.cancel_timeout()
+        """
+        self.timeout_seconds = timeout_seconds
+        
+        async def timeout_monitor():
+            """Monitor execution time and trigger interrupt on timeout."""
+            await asyncio.sleep(timeout_seconds)
+            
+            # Only interrupt if not already interrupted
+            if not self.is_interrupted:
+                timeout_msg = message or f"Execution exceeded {timeout_seconds}s timeout"
+                self.request_interrupt(
+                    reason=InterruptReason.TIMEOUT,
+                    message=timeout_msg,
+                    triggered_by="timeout_monitor",
+                    save_checkpoint=True
+                )
+        
+        # Cancel any existing timeout task
+        if self.timeout_task and not self.timeout_task.done():
+            self.timeout_task.cancel()
+        
+        # Start new timeout monitor
+        self.timeout_task = asyncio.create_task(timeout_monitor())
+    
+    def cancel_timeout(self):
+        """
+        Cancel the timeout monitor if execution completes before timeout.
+        
+        Call this after successful execution to prevent timeout interrupt.
+        
+        Example:
+            state = ExecutionState()
+            state.set_timeout(300)
+            
+            try:
+                result = await ExecutionEvent(actor=agent)(input_data, "", state)
+                # Success - cancel timeout
+                state.cancel_timeout()
+            except ExecutionInterrupted:
+                # Timeout or other interrupt occurred
+                pass
+        """
+        if self.timeout_task and not self.timeout_task.done():
+            self.timeout_task.cancel()
+            self.timeout_task = None

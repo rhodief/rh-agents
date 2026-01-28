@@ -1,11 +1,22 @@
-from typing import Any, Callable, Awaitable, TYPE_CHECKING, Optional
+from typing import Any, Callable, Awaitable, TYPE_CHECKING, Optional, Union
+import asyncio
 from pydantic import BaseModel
 from rh_agents.core.parallel import ErrorStrategy, ParallelExecutionManager
-from rh_agents.core.types import EventType, ExecutionStatus
+from rh_agents.core.types import EventType, ExecutionStatus, InterruptReason, InterruptSignal
 from rh_agents.core.state_recovery import ReplayMode
 
 if TYPE_CHECKING:
     from rh_agents.core.events import ExecutionEvent
+
+# Type alias for interrupt checker function
+InterruptChecker = Union[
+    Callable[[], bool],
+    Callable[[], Awaitable[bool]],
+    Callable[[], InterruptSignal],
+    Callable[[], Awaitable[InterruptSignal]],
+    Callable[[], Optional[InterruptSignal]],
+    Callable[[], Awaitable[Optional[InterruptSignal]]]
+]
 
 class ExecutionStore(BaseModel):
     data: dict[str, str]
@@ -42,6 +53,10 @@ class ExecutionState(BaseModel):
     state_backend: Any | None
     artifact_backend: Any | None
     parallel_manager: Any | None
+    is_interrupted: bool
+    interrupt_signal: Optional[InterruptSignal]
+    interrupt_checker: Optional[InterruptChecker]
+    active_generators: set[asyncio.Task]
     
     def __init__(
         self,
@@ -78,3 +93,21 @@ class ExecutionState(BaseModel):
         circuit_breaker_threshold: int = 5,
         circuit_breaker_timeout: float = 60.0
     ) -> 'ParallelExecutionManager':...
+    
+    # Interrupt management methods
+    def request_interrupt(
+        self,
+        reason: InterruptReason = InterruptReason.USER_CANCELLED,
+        message: Optional[str] = None,
+        triggered_by: Optional[str] = None,
+        save_checkpoint: bool = True
+    ) -> None: ...
+    
+    def set_interrupt_checker(self, checker: Optional[InterruptChecker]) -> None: ...
+    
+    async def check_interrupt(self) -> None: ...
+    
+    # Generator registry methods
+    def register_generator(self, generator_task: asyncio.Task) -> None: ...
+    def unregister_generator(self, generator_task: asyncio.Task) -> None: ...
+    async def kill_generators(self) -> None: ...

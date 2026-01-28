@@ -4,11 +4,12 @@ import datetime
 from time import time
 from typing import Self, Union, Any, Generic, TypeVar
 from pydantic import BaseModel, Field, field_serializer
-from rh_agents.core.types import ExecutionStatus
+from rh_agents.core.types import ExecutionStatus, InterruptSignal
 from rh_agents.core.actors import BaseActor
 from rh_agents.core.execution import ExecutionState
 
 T = TypeVar('T')
+
 
 class ExecutionResult(BaseModel, Generic[T]):
     result: Union[T, None] = Field(default=None, description="Result of the execution")
@@ -88,6 +89,9 @@ class ExecutionEvent(BaseModel, Generic[T]):
         execution_state.push_context(f'{self.actor.name}{"::" + self.tag if self.tag else ""}')
         
         try:
+            # INTERRUPT CHECK 1: Before any processing
+            await execution_state.check_interrupt()
+            
             current_address = execution_state.get_current_address(self.actor.event_type)
             
             # PHASE 2: REPLAY LOGIC
@@ -143,9 +147,15 @@ class ExecutionEvent(BaseModel, Generic[T]):
                     print(f"Warning: No result found for replayed event at {current_address}, re-executing...")
             
             # NOT IN REPLAY MODE or EVENT NOT FOUND or VALIDATION MODE
+            # INTERRUPT CHECK 2: Before preconditions
+            await execution_state.check_interrupt()
+            
             # Run preconditions
             await self.actor.run_preconditions(input_data, extra_context, execution_state)
 
+            # INTERRUPT CHECK 3: After preconditions, before execution
+            await execution_state.check_interrupt()
+            
             # Start timer and mark as started with input details
             self.start_timer()
             self.detail = self._serialize_detail(input_data)
@@ -155,6 +165,9 @@ class ExecutionEvent(BaseModel, Generic[T]):
             if not asyncio.iscoroutinefunction(self.actor.handler):
                 raise TypeError(f"Handler for actor '{self.actor.name}' must be async.")
             result = await self.actor.handler(input_data, extra_context, execution_state)
+            
+            # INTERRUPT CHECK 4: After handler execution
+            await execution_state.check_interrupt()
             
             # Run postconditions
             await self.actor.run_postconditions(result, extra_context, execution_state)
@@ -201,16 +214,33 @@ class ExecutionEvent(BaseModel, Generic[T]):
             return execution_result
 
         except Exception as e:
-            # Stop timer, mark as failed and capture error message
-            self.stop_timer()
-            self.message = str(e)
-            await execution_state.add_event(self, ExecutionStatus.FAILED)  # type: ignore[arg-type]
-            return ExecutionResult(
-                result=None,
-                execution_time=self.execution_time,
-                ok=False,
-                erro_message=str(e)
-            )
+            # Check if it's an interrupt exception
+            from rh_agents.core.exceptions import ExecutionInterrupted
+            
+            if isinstance(e, ExecutionInterrupted):
+                # Handle interruption gracefully
+                self.stop_timer()
+                self.message = e.message
+                self.detail = f"Interrupted: {e.reason.value}"
+                await execution_state.add_event(self, ExecutionStatus.INTERRUPTED)  # type: ignore[arg-type]
+                
+                return ExecutionResult(
+                    result=None,
+                    execution_time=self.execution_time,
+                    ok=False,
+                    erro_message=e.message
+                )
+            else:
+                # Stop timer, mark as failed and capture error message
+                self.stop_timer()
+                self.message = str(e)
+                await execution_state.add_event(self, ExecutionStatus.FAILED)  # type: ignore[arg-type]
+                return ExecutionResult(
+                    result=None,
+                    execution_time=self.execution_time,
+                    ok=False,
+                    erro_message=str(e)
+                )
 
         finally:
             execution_state.pop_context()

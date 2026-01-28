@@ -567,7 +567,7 @@ class ParallelExecutionManager:
         
         Results are returned in the same order as tasks were added,
         regardless of completion order. This method respects the
-        configured error_strategy.
+        configured error_strategy and monitors for interrupt signals.
         
         Returns:
             List of ExecutionResult objects, one per task, in order.
@@ -576,6 +576,7 @@ class ParallelExecutionManager:
         Raises:
             asyncio.TimeoutError: If group timeout exceeded
             Exception: If error_strategy is FAIL_FAST and any task fails
+            ExecutionInterrupted: If execution is interrupted during parallel execution
         
         Example:
             ```python
@@ -596,6 +597,9 @@ class ParallelExecutionManager:
         
         self._gathered = True
         
+        # INTERRUPT CHECK: Before starting parallel execution
+        await self.execution_state.check_interrupt()
+        
         # Create tasks with semaphore wrapper
         self.tasks = [
             asyncio.create_task(
@@ -603,6 +607,23 @@ class ParallelExecutionManager:
             )
             for idx, (coro, name) in enumerate(self.coroutines)
         ]
+        
+        # Create interrupt monitor task
+        async def interrupt_monitor():
+            """Monitor for interrupt signals and cancel all tasks if triggered."""
+            while not all(task.done() for task in self.tasks):
+                try:
+                    # Check for interrupt periodically
+                    await self.execution_state.check_interrupt()
+                    await asyncio.sleep(0.1)  # Check every 100ms
+                except Exception:
+                    # Interrupt detected - cancel all tasks
+                    for task in self.tasks:
+                        if not task.done():
+                            task.cancel()
+                    raise
+        
+        monitor_task = asyncio.create_task(interrupt_monitor())
         
         try:
             # Execute with optional timeout
@@ -619,6 +640,9 @@ class ParallelExecutionManager:
             
             # Mark group as completed
             self.group.mark_completed()
+            
+            # INTERRUPT CHECK: After parallel execution completes
+            await self.execution_state.check_interrupt()
             
             return self.results
             
@@ -642,6 +666,14 @@ class ParallelExecutionManager:
                 self.group.mark_cancelled()
             
             raise
+        
+        finally:
+            # Always cancel the monitor task
+            monitor_task.cancel()
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
     
     async def stream(self) -> AsyncGenerator["ExecutionResult", None]:
         """

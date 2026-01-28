@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import uuid
+import logging
 from collections.abc import AsyncGenerator
 from typing import Any, Callable, Union, Optional, Awaitable, AsyncGenerator, TYPE_CHECKING
 from pydantic import BaseModel, Field, field_serializer
@@ -9,9 +10,19 @@ if TYPE_CHECKING:
     from rh_agents.core.state_backend import StateBackend, ArtifactBackend
     from rh_agents.core.state_recovery import StateSnapshot, StateStatus, StateMetadata
     from rh_agents.core.parallel import ParallelExecutionManager, ErrorStrategy
-from rh_agents.core.types import EventType, ExecutionStatus
+from rh_agents.core.types import EventType, ExecutionStatus, InterruptReason, InterruptSignal
 from rh_agents.core.state_recovery import ReplayMode
 import inspect
+
+# Type alias for interrupt checker function
+InterruptChecker = Union[
+    Callable[[], bool],                                    # Sync function returning bool
+    Callable[[], Awaitable[bool]],                        # Async function returning bool
+    Callable[[], InterruptSignal],                        # Sync function returning signal details
+    Callable[[], Awaitable[InterruptSignal]],             # Async function returning signal details
+    Callable[[], Optional[InterruptSignal]],              # Sync function returning signal or None
+    Callable[[], Awaitable[Optional[InterruptSignal]]]    # Async function returning signal or None
+]
 
 class ExecutionStore(BaseModel):
     data: dict[str, str] = Field(default_factory=dict)
@@ -114,7 +125,7 @@ class EventBus(BaseModel):
     def subscribe(self, handler: Callable):
         self.subscribers.append(handler)
 
-    async def publish(self, event: ExecutionEvent):
+    async def publish(self, event: Union[ExecutionEvent, Any]):  # Accept ExecutionEvent or InterruptEvent
         self.events.append(event)
 
         for handler in self.subscribers:
@@ -132,10 +143,47 @@ class EventBus(BaseModel):
         # Yield control to allow other tasks (like stream generators) to process the event
         await asyncio.sleep(0)
 
-    async def stream(self) -> AsyncGenerator['ExecutionEvent', None]:
-        while True:
-            event = await self.queue.get()
-            yield event
+    async def stream(self) -> AsyncGenerator[Union['ExecutionEvent', Any], None]:
+        """
+        Stream events from the queue.
+        
+        This generator yields execution events as they are published. It automatically
+        terminates when an InterruptEvent is received, allowing for graceful shutdown
+        of streaming endpoints (SSE, WebSocket, etc.).
+        
+        Yields:
+            ExecutionEvent or InterruptEvent: Events from the queue
+        
+        Raises:
+            asyncio.CancelledError: If the stream task is cancelled
+        
+        Example:
+            ```python
+            # In streaming API endpoint
+            async def stream_events():
+                async for event in state.event_bus.stream():
+                    if isinstance(event, InterruptEvent):
+                        # Interrupt received, stream will terminate
+                        break
+                    yield format_event(event)
+            ```
+        """
+        from rh_agents.core.types import InterruptEvent
+        
+        try:
+            while True:
+                event = await self.queue.get()
+                
+                # Check for interrupt event - terminate stream
+                if isinstance(event, InterruptEvent):
+                    logging.info("🛑 Interrupt signal received, terminating event stream...")
+                    yield event  # Yield the interrupt event so handlers can process it
+                    break
+                
+                yield event
+        except asyncio.CancelledError:
+            logging.info("🛑 Event stream cancelled")
+            raise
 
 
 
@@ -158,6 +206,12 @@ class ExecutionState(BaseModel):
     event_bus: EventBus = Field(default_factory=EventBus, exclude=True)
     state_backend: Any = Field(default=None, exclude=True)  # StateBackend at runtime
     artifact_backend: Any = Field(default=None, exclude=True)  # ArtifactBackend at runtime
+    
+    # Interrupt management (excluded from serialization)
+    is_interrupted: bool = Field(default=False, exclude=True)
+    interrupt_signal: Optional[InterruptSignal] = Field(default=None, exclude=True)
+    interrupt_checker: Optional[InterruptChecker] = Field(default=None, exclude=True)
+    active_generators: set[asyncio.Task] = Field(default_factory=set, exclude=True)
     
     def get_current_address(self, event_type: EventType) -> str:
         """Build address from execution stack + event type, e.g. 'doctrine_agent::tool_call'"""
@@ -498,3 +552,237 @@ class ExecutionState(BaseModel):
             resume_from_address
         )
     
+    # ===== Interrupt Management Methods =====
+    
+    def request_interrupt(
+        self,
+        reason: InterruptReason = InterruptReason.USER_CANCELLED,
+        message: Optional[str] = None,
+        triggered_by: Optional[str] = None,
+        save_checkpoint: bool = True
+    ) -> None:
+        """
+        Request interruption of the current execution (local control).
+        
+        This is the primary method for programmatic interrupt control. It sets
+        the internal interrupt flag and creates an InterruptSignal with details.
+        The next interrupt checkpoint will detect this and raise ExecutionInterrupted.
+        
+        Args:
+            reason: Why execution is being interrupted
+            message: Optional human-readable explanation
+            triggered_by: Optional identifier of who/what triggered the interrupt
+            save_checkpoint: Whether to save state before terminating (default: True)
+        
+        Example:
+            ```python
+            # In user-facing API or interrupt handler
+            if should_cancel:
+                state.request_interrupt(
+                    reason=InterruptReason.USER_CANCELLED,
+                    message="User pressed Cancel button",
+                    triggered_by="web_ui_user_123"
+                )
+            ```
+        """
+        self.is_interrupted = True
+        self.interrupt_signal = InterruptSignal(
+            reason=reason,
+            message=message,
+            triggered_by=triggered_by,
+            save_checkpoint=save_checkpoint
+        )
+    
+    def set_interrupt_checker(self, checker: Optional[InterruptChecker]) -> None:
+        """
+        Set external interrupt checker for distributed control.
+        
+        The checker function is called at each interrupt checkpoint to poll
+        external systems (Redis, database, REST API, etc.) for interrupt signals.
+        Supports both sync/async functions returning bool or InterruptSignal.
+        
+        Args:
+            checker: Function to check for external interrupt signal, or None to clear
+        
+        Example:
+            ```python
+            # Redis-based distributed interrupt
+            import redis.asyncio as redis
+            
+            redis_client = redis.Redis(host='localhost', port=6379)
+            
+            async def check_redis():
+                value = await redis_client.get(f"interrupt:{state.state_id}")
+                if value == b"cancel":
+                    return InterruptSignal(
+                        reason=InterruptReason.USER_CANCELLED,
+                        message="Cancelled from admin dashboard",
+                        triggered_by="admin_user"
+                    )
+                return False
+            
+            state.set_interrupt_checker(check_redis)
+            ```
+        """
+        self.interrupt_checker = checker
+    
+    async def check_interrupt(self) -> None:
+        """
+        Check for interrupt signal and raise ExecutionInterrupted if detected.
+        
+        This is called at strategic checkpoints during execution:
+        - Before each agent/tool call
+        - Before each LLM call
+        - Before/after parallel execution batches
+        - During long-running operations
+        
+        Checking logic:
+        1. Check local flag first (fast path)
+        2. If external checker is set, call it and handle return value:
+           - bool True → create default interrupt signal
+           - InterruptSignal → use directly
+           - bool False / None → no interrupt
+        3. If interrupted, publish InterruptEvent and raise ExecutionInterrupted
+        
+        Raises:
+            ExecutionInterrupted: If interrupt is detected from local flag or external checker
+        
+        Example:
+            ```python
+            # Manual checkpoint in long operation
+            async def process_large_dataset(data, context, state):
+                for batch in data.batches():
+                    await state.check_interrupt()  # Check before each batch
+                    results.extend(process_batch(batch))
+            ```
+        """
+        from rh_agents.core.exceptions import ExecutionInterrupted
+        from rh_agents.core.types import InterruptEvent
+        
+        # Fast path: check local flag first
+        if self.is_interrupted:
+            signal = self.interrupt_signal or InterruptSignal(
+                reason=InterruptReason.USER_CANCELLED,
+                message="Execution interrupted"
+            )
+            
+            # Publish interrupt event to event bus (for monitoring/logging)
+            try:
+                interrupt_event = InterruptEvent(signal=signal, state_id=self.state_id)
+                await self.event_bus.publish(interrupt_event)
+            except Exception as e:
+                # If publishing fails, log but don't block interrupt
+                logging.warning(f"Failed to publish interrupt event: {e}")
+            
+            raise ExecutionInterrupted(reason=signal.reason, message=signal.message)
+        
+        # Check external interrupt checker if configured
+        if self.interrupt_checker is not None:
+            result = self.interrupt_checker()
+            
+            # Handle async checker
+            if inspect.iscoroutine(result):
+                result = await result
+            
+            # Handle different return types
+            if result is True:
+                # bool True → create default signal
+                signal = InterruptSignal(
+                    reason=InterruptReason.USER_CANCELLED,
+                    message="External interrupt signal detected"
+                )
+            elif isinstance(result, InterruptSignal):
+                # InterruptSignal → use directly
+                signal = result
+            elif result is False or result is None:
+                # No interrupt
+                return
+            else:
+                # Unexpected return type
+                logging.warning(f"Interrupt checker returned unexpected type: {type(result)}")
+                return
+            
+            # Store signal and set flag
+            self.is_interrupted = True
+            self.interrupt_signal = signal
+            
+            # Publish interrupt event
+            try:
+                interrupt_event = InterruptEvent(signal=signal, state_id=self.state_id)
+                await self.event_bus.publish(interrupt_event)
+            except Exception as e:
+                logging.warning(f"Failed to publish interrupt event: {e}")
+            
+            raise ExecutionInterrupted(reason=signal.reason, message=signal.message)
+    
+    # ===== Generator Registry Management =====
+    
+    def register_generator(self, generator_task: asyncio.Task) -> None:
+        """
+        Register an active event generator task for cleanup on interrupt.
+        
+        This allows the interrupt system to track and cancel all active generators
+        (e.g., EventBus.stream(), SSE endpoints) when execution is interrupted.
+        
+        Args:
+            generator_task: The asyncio Task running the generator
+        
+        Example:
+            ```python
+            # In streaming endpoint
+            stream_task = asyncio.create_task(state.event_bus.stream())
+            state.register_generator(stream_task)
+            
+            try:
+                async for event in stream_task:
+                    yield event
+            finally:
+                state.unregister_generator(stream_task)
+            ```
+        """
+        self.active_generators.add(generator_task)
+    
+    def unregister_generator(self, generator_task: asyncio.Task) -> None:
+        """
+        Remove a generator task from the active registry.
+        
+        Should be called when a generator completes normally or is cancelled.
+        
+        Args:
+            generator_task: The asyncio Task to remove from tracking
+        """
+        self.active_generators.discard(generator_task)
+    
+    async def kill_generators(self) -> None:
+        """
+        Cancel all active event generators immediately.
+        
+        This is called automatically when an interrupt is triggered to ensure
+        all streaming endpoints (SSE, WebSocket, etc.) are cleanly terminated.
+        
+        The method:
+        1. Cancels all registered generator tasks
+        2. Waits for them to complete (with cancellation)
+        3. Clears the registry
+        
+        Example:
+            ```python
+            # Automatically called by check_interrupt(), but can be called manually:
+            state.request_interrupt(reason=InterruptReason.USER_CANCELLED)
+            await state.kill_generators()  # Clean up all streams
+            ```
+        """
+        if not self.active_generators:
+            return
+        
+        # Cancel all active generators
+        for gen_task in list(self.active_generators):
+            if not gen_task.done():
+                gen_task.cancel()
+        
+        # Wait for all to complete (ignoring exceptions from cancellation)
+        if self.active_generators:
+            await asyncio.gather(*self.active_generators, return_exceptions=True)
+        
+        # Clear the registry
+        self.active_generators.clear()

@@ -1,11 +1,12 @@
 import os
 from typing import Any, List, Dict, Union, Optional
 from openai import OpenAI
-from openai.types.chat import ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam, ChatCompletionToolParam
+from openai.types.chat import ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam, ChatCompletionAssistantMessageParam, ChatCompletionToolParam
 from pydantic import BaseModel, Field
 
 from rh_agents.core.actors import LLM, ToolSet
 from rh_agents.core.result_types import LLM_Result, LLM_Tool_Call
+from rh_agents.models import Message, AuthorType
 
 
 class OpenAIFunction(BaseModel):
@@ -28,6 +29,7 @@ class OpenAIRequest(BaseModel):
     max_completion_tokens: int = 4000
     temperature: float = 1
     system_message: str = "You are a helpful assistant."
+    history: Optional[List[Message]] = None
     tools: Optional[ToolSet] = None
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
 
@@ -46,9 +48,17 @@ async def openai_handler(request: OpenAIRequest, **kwargs) -> LLM_Result:
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     # Prepare messages with proper typing
-    messages: List[Union[ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam]] = [
+    messages: List[Union[ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam, ChatCompletionAssistantMessageParam]] = [
         {"role": "system", "content": request.system_message}
     ]
+    
+    # Add conversation history if provided
+    if request.history:
+        for msg in request.history:
+            if msg.author == AuthorType.USER:
+                messages.append({"role": "user", "content": msg.content})
+            else:
+                messages.append({"role": "assistant", "content": msg.content})
     
     # Add the main prompt
     messages.append({"role": "user", "content": request.prompt})

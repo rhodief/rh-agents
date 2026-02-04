@@ -330,6 +330,7 @@ class OmniAgent(Agent):
             if isinstance(result.result, Message):
                 return result.result
             doctrine = result.result
+            await execution_state.log(f"Doctrine received with goal: {doctrine.goal} and {len(doctrine.steps)} steps.")
             for step in doctrine.steps:
                 if not step.feasible:
                     raise Exception(f"Step {step.index} not feasible")
@@ -343,9 +344,7 @@ class OmniAgent(Agent):
                 execution_state.add_step_result(step.index, step_result.result)
             
             # After all steps complete, call the ReviewerAgent to generate final results
-            print("\n" + "═" * 60)
-            print("🔍 Iniciando Revisão Final...")
-            print("═" * 60 + "\n")
+            await execution_state.log("Iniciando Revisão Final...")
             
             review_result = await ExecutionEvent(actor=reviewer_agent, tag='final_review')(doctrine, '', execution_state)
             if not review_result.ok or review_result.result is None:

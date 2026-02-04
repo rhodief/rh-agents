@@ -29,7 +29,7 @@ from rh_agents.core.state_recovery import (
 
 # Event system
 from rh_agents.bus_handlers import EventPrinter, EventStreamer
-from rh_agents.core.types import EventType, ExecutionStatus
+from rh_agents.core.types import EventType, ExecutionStatus, LogEvent, LogSeverity
 
 # Data models
 from rh_agents.models import Message, AuthorType, ArtifactRef

@@ -9,7 +9,7 @@ import json
 from collections.abc import Callable
 from typing import AsyncGenerator, Optional, Any, TYPE_CHECKING
 from rh_agents.core.events import ExecutionEvent
-from rh_agents.core.types import EventType, ExecutionStatus, InterruptEvent
+from rh_agents.core.types import EventType, ExecutionStatus, InterruptEvent, LogEvent, LogSeverity
 
 if TYPE_CHECKING:
     from rh_agents.core.parallel import ParallelGroupTracker
@@ -48,6 +48,15 @@ class EventPrinter:
         EventType.AGENT_CALL: "🤖",
         EventType.TOOL_CALL: "🔧",
         EventType.LLM_CALL: "🧠",
+    }
+    
+    # Log severity colors and icons
+    LOG_SEVERITY_CONFIG = {
+        LogSeverity.DEBUG: ("🔍", GRAY, "DEBUG"),
+        LogSeverity.INFO: ("ℹ️", BLUE, "INFO"),
+        LogSeverity.WARNING: ("⚠️", YELLOW, "WARNING"),
+        LogSeverity.ERROR: ("❌", RED, "ERROR"),
+        LogSeverity.CRITICAL: ("🔥", RED, "CRITICAL"),
     }
     
     def __init__(self, show_timestamp: bool = True, show_address: bool = True):
@@ -277,10 +286,66 @@ class EventPrinter:
         
         print(f"\n{self.RED}{self.BOLD}{'═' * 70}{self.RESET}\n")
     
+    def print_log(self, event: LogEvent):
+        """Print a beautifully formatted log event."""
+        icon, color, severity_text = self.LOG_SEVERITY_CONFIG.get(
+            event.severity, ("📝", self.WHITE, "LOG")
+        )
+        
+        # Calculate indent from address
+        indent_level = self._get_indent_level(event.address)
+        indent = "  │ " * indent_level
+        
+        # Build the output
+        lines = []
+        
+        # Timestamp (formatted)
+        timestamp = event.timestamp[:19].replace("T", " ") if len(event.timestamp) >= 19 else event.timestamp
+        
+        # Main log line
+        main_line = (
+            f"{self.GRAY}{indent}{self.RESET}"
+            f"{color}{self.BOLD}{icon}{self.RESET} "
+            f"📋 "
+            f"{color}[{severity_text}]{self.RESET} "
+            f"{event.message}"
+        )
+        lines.append(main_line)
+        
+        # Address line (if has content)
+        if self.show_address and event.address:
+            address_line = (
+                f"{self.GRAY}{indent}  ├─ 📍 {event.address}{self.RESET}"
+            )
+            lines.append(address_line)
+        
+        # Timestamp line (if enabled)
+        if self.show_timestamp:
+            time_line = (
+                f"{self.GRAY}{indent}  ├─ 🕐 {timestamp}{self.RESET}"
+            )
+            lines.append(time_line)
+        
+        # Metadata (if present)
+        if event.metadata:
+            metadata_preview = self._truncate(str(event.metadata), 100)
+            metadata_line = (
+                f"{self.GRAY}{indent}  ├─ 📦 {metadata_preview}{self.RESET}"
+            )
+            lines.append(metadata_line)
+        
+        # Closing line
+        lines.append(f"{self.GRAY}{indent}  └{'─' * 40}{self.RESET}")
+        
+        # Print all lines
+        print("\n".join(lines))
+    
     def __call__(self, event):
-        """Allow using the printer as a callback. Handles both ExecutionEvent and InterruptEvent."""
+        """Allow using the printer as a callback. Handles ExecutionEvent, InterruptEvent, and LogEvent."""
         if isinstance(event, InterruptEvent):
             self.print_interrupt(event)
+        elif isinstance(event, LogEvent):
+            self.print_log(event)
         elif isinstance(event, ExecutionEvent):
             self.print_event(event)
         else:

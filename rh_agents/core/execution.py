@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from rh_agents.core.state_backend import StateBackend, ArtifactBackend
     from rh_agents.core.state_recovery import StateSnapshot, StateStatus, StateMetadata
     from rh_agents.core.parallel import ParallelExecutionManager, ErrorStrategy
-from rh_agents.core.types import EventType, ExecutionStatus, InterruptReason, InterruptSignal
+from rh_agents.core.types import EventType, ExecutionStatus, InterruptReason, InterruptSignal, LogEvent, LogSeverity
 from rh_agents.core.state_recovery import ReplayMode
 import inspect
 
@@ -265,6 +265,50 @@ class ExecutionState(BaseModel):
     def get_all_steps_results(self) -> dict[str, str]:
         """Retrieve all stored execution results"""
         return self.storage.data.copy()
+    
+    async def log(
+        self,
+        message: str,
+        severity: LogSeverity = LogSeverity.INFO,
+        metadata: dict[str, Any] | None = None
+    ) -> None:
+        """
+        Publish a log event to the event bus.
+        
+        The log event's address is derived from the current execution context,
+        similar to how agent/tool events are addressed. For example, if called
+        within an agent named "Foo", the log address will be "Foo::log_event".
+        
+        Args:
+            message: The log message
+            severity: Log severity level (default: INFO)
+            metadata: Optional arbitrary metadata dict
+        
+        Example:
+            ```python
+            # Within an agent or tool
+            await state.log("Processing started", LogSeverity.INFO)
+            await state.log(
+                "Found items",
+                LogSeverity.DEBUG,
+                metadata={"count": 42, "source": "db"}
+            )
+            ```
+        """
+        # Build address from current execution stack
+        if self.execution_stack:
+            address = "::".join(self.execution_stack) + "::log_event"
+        else:
+            address = "log_event"
+        
+        log_event = LogEvent(
+            severity=severity,
+            message=message,
+            metadata=metadata or {},
+            address=address
+        )
+        
+        await self.event_bus.publish(log_event)
     
     def parallel(
         self,

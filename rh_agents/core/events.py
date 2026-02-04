@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 from time import time
-from typing import Self, Union, Any, Generic, TypeVar
+from typing import Self, Union, Any, Generic, TypeVar, Dict
 from pydantic import BaseModel, Field, field_serializer
 from rh_agents.core.types import ExecutionStatus, InterruptSignal
 from rh_agents.core.actors import BaseActor
@@ -21,6 +21,7 @@ class ExecutionEvent(BaseModel, Generic[T]):
     actor: BaseActor
     datetime: str = Field(default_factory=lambda: datetime.datetime.now().isoformat(), description="Timestamp of the event in milliseconds since epoch")
     address: str = Field(default="", description="Address of the agent triggering the event on exectution tree")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata to store relevant information for the event")
     execution_time: Union[float, None] = Field(default=None, description="Execution time in seconds")
     execution_status: ExecutionStatus = Field(default = ExecutionStatus.STARTED, description="Status of the execution event")
     message: Union[str, None] = Field(default=None, description="Optional message associated with the event")

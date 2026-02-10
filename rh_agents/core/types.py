@@ -19,6 +19,7 @@ class ExecutionStatus(str, Enum):
     RECOVERED = 'recovered'
     INTERRUPTED = 'interrupted'  # NEW: Execution was interrupted
     CANCELLING = 'cancelling'    # NEW: Transitional state during cancellation
+    RETRYING = 'retrying'        # NEW: Event is being retried after failure
 
 
 class InterruptReason(str, Enum):

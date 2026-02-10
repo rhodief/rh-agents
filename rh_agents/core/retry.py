@@ -3,8 +3,11 @@ Retry mechanism for execution events.
 
 Provides configurable retry behavior with:
 - Multiple backoff strategies (constant, linear, exponential, fibonacci)
-- Smart error filtering (whitelist/blacklist with sensible defaults)
+- Intuitive error filtering: retry ALL errors by default, opt-out with exclude_exceptions
 - Configuration at multiple levels (event, actor-type, global, built-in defaults)
+
+Key Feature: If you set retry_config, ALL exceptions are retried by default.
+Use exclude_exceptions to prevent retry on specific errors.
 """
 from __future__ import annotations
 import asyncio
@@ -99,14 +102,14 @@ class RetryConfig(BaseModel):
         description="Add random jitter to prevent thundering herd"
     )
     
-    # Error filtering (override defaults)
+    # Error filtering
     retry_on_exceptions: Optional[list[type[Exception]]] = Field(
         default=None, 
-        description="Whitelist of exceptions to retry (overrides defaults if set)"
+        description="Whitelist of exceptions to retry (opt-in mode - when set, ONLY these exceptions will be retried)"
     )
     exclude_exceptions: Optional[list[type[Exception]]] = Field(
         default=None, 
-        description="Blacklist of exceptions to never retry (merged with defaults)"
+        description="Exceptions that should NOT be retried (opt-out mode - useful to prevent retry on specific errors)"
     )
     
     # Timeout settings
@@ -128,10 +131,15 @@ class RetryConfig(BaseModel):
         """
         Determine if an exception should trigger a retry.
         
+        **Intuitive Default Behavior:**
+        - If retry_config is set, ALL exceptions are retried by default
+        - Use exclude_exceptions to opt-out specific errors from retry
+        - Use retry_on_exceptions for opt-in mode (only retry specific errors)
+        
         Logic:
-        1. Check if exception is in exclude list (defaults + user-specified)
-        2. If whitelist is set, exception must be in it
-        3. Otherwise, check if exception is in default retryable list
+        1. If exclude_exceptions is set, don't retry those exceptions
+        2. If retry_on_exceptions is set, ONLY retry those exceptions (opt-in mode)
+        3. Otherwise, retry ALL exceptions (default when retry_config is present)
         
         Args:
             exception: The exception that occurred
@@ -140,29 +148,33 @@ class RetryConfig(BaseModel):
             True if the exception should trigger a retry, False otherwise
             
         Examples:
+            >>> # Default: retry everything
             >>> config = RetryConfig()
-            >>> config.should_retry(TimeoutError())  # True (in defaults)
-            >>> config.should_retry(ValueError())    # False (non-retryable)
+            >>> config.should_retry(TimeoutError())  # True
+            >>> config.should_retry(ValueError())    # True
+            >>> config.should_retry(Exception())     # True
             
+            >>> # Opt-out mode: retry everything except ValueError
+            >>> config = RetryConfig(exclude_exceptions=[ValueError])
+            >>> config.should_retry(TimeoutError())  # True
+            >>> config.should_retry(ValueError())    # False
+            
+            >>> # Opt-in mode: ONLY retry TimeoutError
             >>> config = RetryConfig(retry_on_exceptions=[TimeoutError])
-            >>> config.should_retry(TimeoutError())     # True (in whitelist)
-            >>> config.should_retry(ConnectionError())  # False (not in whitelist)
+            >>> config.should_retry(TimeoutError())     # True
+            >>> config.should_retry(ConnectionError())  # False
         """
-        # Build effective exclude list (user's + defaults)
-        exclude_list = DEFAULT_NON_RETRYABLE_EXCEPTIONS.copy()
+        # Check exclude list first (opt-out mode)
         if self.exclude_exceptions:
-            exclude_list.extend(self.exclude_exceptions)
+            if any(isinstance(exception, exc_type) for exc_type in self.exclude_exceptions):
+                return False
         
-        # Check exclusions first
-        if any(isinstance(exception, exc_type) for exc_type in exclude_list):
-            return False
-        
-        # If whitelist is set, exception must be in it
+        # If whitelist is set, use opt-in mode (ONLY retry specified exceptions)
         if self.retry_on_exceptions is not None:
             return any(isinstance(exception, exc_type) for exc_type in self.retry_on_exceptions)
         
-        # Otherwise, check default retryable list
-        return any(isinstance(exception, exc_type) for exc_type in DEFAULT_RETRYABLE_EXCEPTIONS)
+        # Default: retry ALL exceptions (most intuitive when retry_config is set)
+        return True
     
     def calculate_delay(self, attempt: int) -> float:
         """

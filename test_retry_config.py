@@ -185,16 +185,17 @@ class TestErrorFiltering:
         assert config.should_retry(ConnectionAbortedError()) is True
         assert config.should_retry(ConnectionRefusedError()) is True
     
-    def test_default_non_retryable_exceptions(self):
-        """Default behavior doesn't retry permanent errors."""
+    def test_default_retries_all_exceptions(self):
+        """New intuitive behavior: retry ALL exceptions by default."""
         config = RetryConfig()
         
-        # Should NOT retry these (in DEFAULT_NON_RETRYABLE_EXCEPTIONS)
-        assert config.should_retry(ValueError()) is False
-        assert config.should_retry(TypeError()) is False
-        assert config.should_retry(KeyError()) is False
-        assert config.should_retry(AttributeError()) is False
-        assert config.should_retry(AssertionError()) is False
+        # ALL exceptions should be retried by default
+        assert config.should_retry(ValueError()) is True
+        assert config.should_retry(TypeError()) is True
+        assert config.should_retry(KeyError()) is True
+        assert config.should_retry(AttributeError()) is True
+        assert config.should_retry(AssertionError()) is True
+        assert config.should_retry(Exception()) is True
     
     def test_whitelist_overrides_defaults(self):
         """When whitelist is set, only those exceptions are retried."""
@@ -209,20 +210,20 @@ class TestErrorFiltering:
         assert config.should_retry(ConnectionError()) is False
         assert config.should_retry(RuntimeError()) is False
     
-    def test_blacklist_merges_with_defaults(self):
-        """exclude_exceptions is merged with DEFAULT_NON_RETRYABLE_EXCEPTIONS."""
+    def test_exclude_exceptions_opt_out(self):
+        """exclude_exceptions lets you opt-out specific errors from retry."""
         config = RetryConfig(
-            exclude_exceptions=[RuntimeError]
+            exclude_exceptions=[RuntimeError, ValueError]
         )
         
-        # Default non-retryable should still be excluded
+        # Excluded exceptions should NOT be retried
+        assert config.should_retry(RuntimeError()) is False
         assert config.should_retry(ValueError()) is False
         
-        # Custom exclusion should also work
-        assert config.should_retry(RuntimeError()) is False
-        
-        # Other retryable errors should work
+        # Other exceptions should be retried (default behavior)
         assert config.should_retry(TimeoutError()) is True
+        assert config.should_retry(ConnectionError()) is True
+        assert config.should_retry(TypeError()) is True
     
     def test_whitelist_and_blacklist_together(self):
         """Blacklist takes precedence over whitelist."""
@@ -240,13 +241,15 @@ class TestErrorFiltering:
         # RuntimeError is not in whitelist
         assert config.should_retry(RuntimeError()) is False
     
-    def test_empty_whitelist_uses_defaults(self):
-        """When whitelist is None (not empty list), use defaults."""
+    def test_none_whitelist_retries_all(self):
+        """When whitelist is None, retry ALL exceptions (new default)."""
         config = RetryConfig(retry_on_exceptions=None)
         
-        # Should use default behavior
+        # ALL exceptions should be retried when retry_on_exceptions is None
         assert config.should_retry(TimeoutError()) is True
-        assert config.should_retry(ValueError()) is False
+        assert config.should_retry(ValueError()) is True
+        assert config.should_retry(RuntimeError()) is True
+        assert config.should_retry(Exception()) is True
 
 
 class TestRetryTimeout:

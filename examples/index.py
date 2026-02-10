@@ -86,8 +86,9 @@ if __name__ == "__main__":
             actor=omni_agent, 
             retry_config=RetryConfig(
                 max_attempts=3, 
-                initial_delay=1.0,
-                retry_on_exceptions=[Exception]  # Whitelist all exceptions
+                initial_delay=1.0
+                # By default, ALL exceptions are retried!
+                # Use exclude_exceptions=[ValueError] to opt-out specific errors
             )
         )(message, "", agent_execution_state)
         

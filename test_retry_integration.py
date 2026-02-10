@@ -185,7 +185,7 @@ class TestRetryLoopBasics:
     
     @pytest.mark.asyncio
     async def test_non_retryable_error_no_retry(self):
-        """Non-retryable errors should not trigger retry."""
+        """Errors can be excluded from retry using exclude_exceptions."""
         # Setup
         state = ExecutionState()
         events_received = []
@@ -211,7 +211,10 @@ class TestRetryLoopBasics:
         
         event = ExecutionEvent(
             actor=actor,
-            retry_config=RetryConfig(max_attempts=3)
+            retry_config=RetryConfig(
+                max_attempts=3,
+                exclude_exceptions=[ValueError]  # Opt-out ValueError from retry
+            )
         )
         
         # Execute

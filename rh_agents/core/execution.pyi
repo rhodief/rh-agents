@@ -2,8 +2,8 @@ from typing import Any, Callable, Awaitable, TYPE_CHECKING, Optional, Union
 import asyncio
 from pydantic import BaseModel
 from rh_agents.core.parallel import ErrorStrategy, ParallelExecutionManager
-from rh_agents.core.types import EventType, ExecutionStatus, InterruptReason, InterruptSignal
-from rh_agents.core.state_recovery import ReplayMode
+from rh_agents.core.types import EventType, ExecutionStatus, InterruptReason, InterruptSignal, LogSeverity
+from rh_agents.core.state_recovery import ReplayMode, StateMetadata, StateStatus, StateStatus
 
 if TYPE_CHECKING:
     from rh_agents.core.events import ExecutionEvent
@@ -57,6 +57,8 @@ class ExecutionState(BaseModel):
     interrupt_signal: Optional[InterruptSignal]
     interrupt_checker: Optional[InterruptChecker]
     active_generators: set[asyncio.Task]
+    default_retry_config: Optional[Any]
+    retry_config_by_actor_type: dict[EventType, Any]
     
     def __init__(
         self,
@@ -120,3 +122,16 @@ class ExecutionState(BaseModel):
     ) -> None: ...
     
     def cancel_timeout(self) -> None: ...
+    
+    async def log(
+        self,
+        message: str,
+        severity: LogSeverity = LogSeverity.INFO,
+        metadata: dict[str, Any] | None = None
+    ) -> None: ...
+
+    def save_checkpoint(
+        self,
+        status: Optional["StateStatus"] = None,
+        metadata: Optional["StateMetadata"] = None
+    ) -> bool: ...

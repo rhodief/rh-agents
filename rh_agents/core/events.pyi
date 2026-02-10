@@ -42,6 +42,12 @@ class ExecutionEvent(Generic[T]):
     parallel_index: int | None
     is_parallel: bool
     
+    retry_config: Any |  None
+    retry_attempt: int
+    is_retry: bool
+    original_error: str | None
+    retry_delay: float | None
+    
     # Overload for LLM actors with known output type
     @overload
     def __init__(

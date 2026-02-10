@@ -72,7 +72,8 @@ class HistorySet(BaseModel):
             yield address, event
 
     def get_event_list(self) -> list[Union['ExecutionEvent', dict[str, Any]]]:
-        return list(self.__events.values())
+        """Return all events in chronological order (including multiple events per address)."""
+        return self.events
     
     def __getitem__(self, key: str) -> Union['ExecutionEvent', dict[str, Any]]:
         return self.__events[key]

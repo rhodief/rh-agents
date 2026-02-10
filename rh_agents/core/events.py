@@ -84,6 +84,36 @@ class ExecutionEvent(BaseModel, Generic[T]):
         except Exception:
             return str(data)[:self.max_detail_length]
     
+    async def _interruptible_sleep(self, delay: float, execution_state: 'ExecutionState') -> None:
+        """
+        Sleep with periodic interrupt checking (Phase 5).
+        
+        Breaks the delay into smaller chunks (0.1s) and checks for interrupts
+        between each chunk. This ensures responsive interrupt handling during
+        long retry backoff delays.
+        
+        Args:
+            delay: Total delay duration in seconds
+            execution_state: ExecutionState for interrupt checking
+            
+        Raises:
+            ExecutionInterrupted: If interrupt is detected during sleep
+        """
+        from rh_agents.core.exceptions import ExecutionInterrupted
+        
+        # Break delay into 0.1s chunks for responsive interrupt checking
+        chunk_size = 0.1
+        remaining = delay
+        
+        while remaining > 0:
+            sleep_time = min(chunk_size, remaining)
+            await asyncio.sleep(sleep_time)
+            remaining -= sleep_time
+            
+            # Check for interrupt after each chunk
+            if remaining > 0:  # Don't check on last iteration (about to return anyway)
+                await execution_state.check_interrupt()
+    
 
     
     async def __call__(self, input_data, extra_context, execution_state: ExecutionState) -> ExecutionResult[T]:
@@ -339,8 +369,18 @@ class ExecutionEvent(BaseModel, Generic[T]):
                         )
                         await execution_state.add_event(retrying_event, ExecutionStatus.RETRYING)  # type: ignore[arg-type]
                         
-                        # Wait with backoff (Phase 5 will add interrupt checking here)
-                        await asyncio.sleep(delay)
+                        # Wait with backoff - check for interrupts periodically (Phase 5)
+                        try:
+                            await self._interruptible_sleep(delay, execution_state)
+                        except ExecutionInterrupted as interrupt_exc:
+                            # Interrupted during backoff wait - add INTERRUPTED event then re-raise
+                            self.stop_timer()
+                            self.message = interrupt_exc.message
+                            self.detail = f"Interrupted during retry backoff: {interrupt_exc.reason.value}"
+                            await execution_state.add_event(self, ExecutionStatus.INTERRUPTED)  # type: ignore[arg-type]
+                            
+                            # Re-raise to propagate interrupt to caller
+                            raise
                         
                         # Continue to next attempt
                         continue

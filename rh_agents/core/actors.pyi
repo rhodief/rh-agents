@@ -20,6 +20,7 @@ class BaseActor:
     version: str
     cache_ttl: int | None
     is_artifact: bool
+    retry_config: Any | None
     
     async def run_preconditions(self, input_data: Any, extra_context: str, execution_state: ExecutionState) -> None: ...
     async def run_postconditions(self, result: Any, extra_context: str, execution_state: ExecutionState) -> None: ...

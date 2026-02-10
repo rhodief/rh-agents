@@ -22,6 +22,8 @@ class BaseActor(BaseModel):
     version: str = Field(default="1.0.0", description="Actor version for cache invalidation")
     cache_ttl: Union[int, None] = Field(default=None, description="Cache TTL in seconds, None means no expiration")
     is_artifact: bool = Field(default=False, description="Whether this actor produces artifacts that should be stored separately")
+    # Type: RetryConfig (from rh_agents.core.retry) - using Any to avoid circular import
+    retry_config: Union[Any, None] = Field(default=None, description="Actor-level retry configuration")
     
     async def run_preconditions(self, input_data, extra_context, execution_state: ExecutionState):
         """Run all precondition checks before execution (async)"""

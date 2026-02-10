@@ -18,7 +18,8 @@ def tool(
     name: str | None = None,
     description: str | None = None,
     cacheable: bool = False,
-    version: str = "1.0.0"
+    version: str = "1.0.0",
+    retry_config: Any | None = None
 ) -> Callable[[F], Tool]:
     """
     Decorator to create a Tool from an async function.
@@ -35,6 +36,7 @@ def tool(
         description: Tool description (defaults to function docstring)
         cacheable: Whether results should be cached
         version: Tool version for cache invalidation
+        retry_config: Actor-level retry configuration (RetryConfig instance)
     """
     def decorator(func: F) -> Tool:
         import inspect
@@ -73,7 +75,8 @@ def tool(
             input_model=input_model,
             handler=handler,
             cacheable=cacheable,
-            version=version
+            version=version,
+            retry_config=retry_config
         )
 
     return decorator
@@ -84,7 +87,8 @@ def agent(
     description: str | None = None,
     tools: list[Tool] | None = None,
     llm: LLM | None = None,
-    cacheable: bool = False
+    cacheable: bool = False,
+    retry_config: Any | None = None
 ) -> Callable[[F], Agent]:
     """
     Decorator to create an Agent from an async function.
@@ -101,6 +105,7 @@ def agent(
         tools: List of tools available to the agent
         llm: LLM instance for the agent
         cacheable: Whether results should be cached
+        retry_config: Actor-level retry configuration (RetryConfig instance)
     """
     def decorator(func: F) -> Agent:
         import inspect
@@ -141,7 +146,8 @@ def agent(
             handler=handler,
             tools=ToolSet(tools=tools or []),
             llm=llm,
-            cacheable=cacheable
+            cacheable=cacheable,
+            retry_config=retry_config
         )
 
     return decorator

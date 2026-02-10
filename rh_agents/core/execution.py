@@ -215,6 +215,11 @@ class ExecutionState(BaseModel):
     timeout_task: Optional[asyncio.Task] = Field(default=None, exclude=True)
     timeout_seconds: Optional[float] = Field(default=None, exclude=True)
     
+    # Retry configuration (Phase 2: Multi-level config)
+    # Type: RetryConfig (from rh_agents.core.retry) - using Any to avoid circular import
+    default_retry_config: Optional[Any] = Field(default=None, description="Global default retry configuration")
+    retry_config_by_actor_type: dict[EventType, Any] = Field(default_factory=dict, description="Retry config per actor type (TOOL_CALL, LLM_CALL, AGENT_CALL)")
+    
     def get_current_address(self, event_type: EventType) -> str:
         """Build address from execution stack + event type, e.g. 'doctrine_agent::tool_call'"""
         if not self.execution_stack:

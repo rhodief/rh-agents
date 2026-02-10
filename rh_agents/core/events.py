@@ -162,21 +162,45 @@ class ExecutionEvent(BaseModel, Generic[T]):
             # INTERRUPT CHECK 2: Before preconditions
             await execution_state.check_interrupt()
             
-            # PHASE 1: Get effective retry configuration (if any)
+            # PHASE 2: Get effective retry configuration with precedence:
+            # 1. Event-level config (self.retry_config)
+            # 2. Actor-level config (self.actor.retry_config)
+            # 3. ExecutionState type-specific config (execution_state.retry_config_by_actor_type)
+            # 4. ExecutionState global default (execution_state.default_retry_config)
+            # 5. Built-in defaults (from get_default_retry_config_by_actor_type)
+            # Note: Disabled configs at higher levels fall through to lower levels
             from rh_agents.core.retry import get_default_retry_config_by_actor_type
             
             retry_config = None
-            # Check event-level config first
-            if self.retry_config is not None:
-                retry_config = self.retry_config if self.retry_config.enabled else None
-            # Fall back to state's retry configs (will be implemented in Phase 2)
-            # For now, just use defaults
-            elif not hasattr(execution_state, 'default_retry_config'):
-                # Phase 1: Use built-in defaults
+            
+            # Level 1: Event-level config
+            if self.retry_config is not None and self.retry_config.enabled:
+                retry_config = self.retry_config
+            
+            # Level 2: Actor-level config (if not found at event level)
+            if retry_config is None and hasattr(self.actor, 'retry_config') and self.actor.retry_config is not None:  # type: ignore[attr-defined]
+                if self.actor.retry_config.enabled:  # type: ignore[attr-defined]
+                    retry_config = self.actor.retry_config  # type: ignore[attr-defined]
+            
+            # Level 3: ExecutionState type-specific config (if not found yet)
+            if retry_config is None and execution_state.retry_config_by_actor_type:  # type: ignore[attr-defined]
+                if self.actor.event_type in execution_state.retry_config_by_actor_type:  # type: ignore[attr-defined]
+                    type_config = execution_state.retry_config_by_actor_type[self.actor.event_type]  # type: ignore[attr-defined]
+                    if type_config.enabled:
+                        retry_config = type_config
+            
+            # Level 4: ExecutionState global default (if not found yet)
+            if retry_config is None and execution_state.default_retry_config is not None:  # type: ignore[attr-defined]
+                if execution_state.default_retry_config.enabled:  # type: ignore[attr-defined]
+                    retry_config = execution_state.default_retry_config  # type: ignore[attr-defined]
+            
+            # Level 5: Built-in defaults (if not found yet)
+            if retry_config is None:
                 defaults = get_default_retry_config_by_actor_type()
                 if self.actor.event_type in defaults:
                     config = defaults[self.actor.event_type]
-                    retry_config = config if config.enabled else None
+                    if config.enabled:
+                        retry_config = config
             
             # Run preconditions (once, outside retry loop)
             await self.actor.run_preconditions(input_data, extra_context, execution_state)

@@ -41,6 +41,7 @@ class EventPrinter:
         ExecutionStatus.AWAITING: ("⏳", YELLOW, "AWAITING"),
         ExecutionStatus.HUMAN_INTERVENTION: ("👤", MAGENTA, "HUMAN"),
         ExecutionStatus.RECOVERED: ("♻", YELLOW, "RECOVERED"),
+        ExecutionStatus.RETRYING: ("↻", YELLOW, "RETRYING"),
     }
     
     # Event type icons
@@ -73,6 +74,10 @@ class EventPrinter:
         self.events_by_type: dict[str, int] = {}
         self.cache_hits = 0
         self.cache_misses = 0
+        # Retry statistics tracking
+        self.retry_events = 0
+        self.events_with_retries: set[str] = set()  # Track unique events that retried
+        self.total_retry_attempts = 0
     
     def _get_indent_level(self, address: str) -> int:
         """Calculate indentation based on address depth."""
@@ -115,6 +120,12 @@ class EventPrinter:
         elif status == ExecutionStatus.RECOVERED:
             self.recovered_events += 1
             self.cache_hits += 1
+        elif status == ExecutionStatus.RETRYING:
+            self.retry_events += 1
+            if event.address:
+                self.events_with_retries.add(event.address)
+            # Count all retry events as attempts
+            self.total_retry_attempts += 1
         
         # Track by event type
         event_type = event.actor.event_type.value if hasattr(event.actor.event_type, 'value') else str(event.actor.event_type)
@@ -161,6 +172,16 @@ class EventPrinter:
             )
             lines.append(time_line)
         
+        # Retry information (if this is a retry or has retry config)
+        if hasattr(event, 'retry_attempt') and event.retry_attempt > 0:
+            retry_info = f"{self.YELLOW}↻ Retry attempt {event.retry_attempt + 1}{self.RESET}"
+            if hasattr(event, 'retry_delay') and event.retry_delay:
+                retry_info += f" {self.GRAY}(after {self._format_time(event.retry_delay)}){self.RESET}"
+            retry_line = (
+                f"{self.GRAY}{indent}  ├─ {retry_info}"
+            )
+            lines.append(retry_line)
+        
         # Detail information (if available)
         if event.detail:
             detail_preview = self._truncate(event.detail.replace('\n', ' '), 100)
@@ -170,6 +191,10 @@ class EventPrinter:
             if event.from_cache and status == ExecutionStatus.RECOVERED:
                 detail_icon = "💾"
                 detail_preview = f"{self.YELLOW}[FROM CACHE]{self.RESET} {detail_preview}"
+            
+            # Special handling for RETRYING status
+            if status == ExecutionStatus.RETRYING:
+                detail_icon = "↻"
             
             detail_line = (
                 f"{self.GRAY}{indent}  ├─ {detail_icon} {detail_preview}{self.RESET}"
@@ -184,6 +209,19 @@ class EventPrinter:
                 f"{self.YELLOW}✨ {cache_msg}{self.RESET}"
             )
             lines.append(cache_line)
+        
+        # Retry message (if retrying)
+        if status == ExecutionStatus.RETRYING and event.message:
+            retry_msg = self._truncate(event.message, 80)
+            # Show original error if available
+            if hasattr(event, 'original_error') and event.original_error:
+                error_preview = self._truncate(str(event.original_error), 60)
+                retry_msg = f"Previous error: {error_preview}"
+            retry_line = (
+                f"{self.GRAY}{indent}  ├─ {self.RESET}"
+                f"{self.YELLOW}↻ {retry_msg}{self.RESET}"
+            )
+            lines.append(retry_line)
         
         # Error message (if failed)
         if status == ExecutionStatus.FAILED and event.message:
@@ -245,6 +283,19 @@ class EventPrinter:
                         icon = et_icon
                         break
                 print(f"  {icon} {event_type}: {self.BLUE}{count}{self.RESET}")
+        
+        # Retry statistics
+        if self.retry_events > 0:
+            print(f"\n{self.BOLD}Retry Statistics:{self.RESET}")
+            print(f"  {self.YELLOW}├─{self.RESET} Total Retry Events: {self.YELLOW}{self.retry_events}{self.RESET}")
+            print(f"  {self.YELLOW}├─{self.RESET} Events That Retried: {self.YELLOW}{len(self.events_with_retries)}{self.RESET}")
+            print(f"  {self.YELLOW}└─{self.RESET} Total Retry Attempts: {self.YELLOW}{self.total_retry_attempts}{self.RESET}")
+            
+            # Calculate retry rate if we have started events
+            if self.started_events > 0:
+                retry_rate = (len(self.events_with_retries) / self.started_events) * 100
+                rate_color = self.GREEN if retry_rate < 10 else (self.YELLOW if retry_rate < 30 else self.RED)
+                print(f"      {self.GRAY}↻ Retry Rate: {rate_color}{retry_rate:.1f}%{self.RESET}")
         
         print(f"\n{self.BOLD}{self.CYAN}{'═' * 70}{self.RESET}\n")
     

@@ -24,7 +24,7 @@ test_actor = Tool(
     cacheable=False
 )
 
-def test_event_immutability():
+async def test_event_immutability():
     """Test that events cannot be mutated by subscribers."""
     
     # Create event bus

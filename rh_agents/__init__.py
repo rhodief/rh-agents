@@ -35,7 +35,11 @@ from rh_agents.core.types import EventType, ExecutionStatus, LogEvent, LogSeveri
 from rh_agents.models import Message, AuthorType, ArtifactRef
 
 # Parallel execution
-from rh_agents.core.parallel import ErrorStrategy, ParallelEventGroup
+from rh_agents.core.parallel import ErrorStrategy as ParallelErrorStrategy, ParallelEventGroup
+
+# Builder types
+from rh_agents.core.types import ErrorStrategy as BuilderErrorStrategy, AggregationStrategy
+from rh_agents.core.result_types import ToolExecutionResult
 
 # Additional helpers (Phase 2)
 from rh_agents.decorators import tool as tool_decorator, agent as agent_decorator
@@ -46,7 +50,13 @@ from rh_agents.validation import (
     ActorValidationError,
     StateValidationError
 )
-from rh_agents.builders import AgentBuilder, ToolBuilder
+from rh_agents.builders import (
+    BuilderAgent,
+    StructuredAgent,
+    CompletionAgent,
+    ToolExecutorAgent,
+    DirectToolAgent
+)
 
 __version__ = "2.0.0"
 
@@ -57,6 +67,12 @@ __all__ = [
     "LLM",
     "ToolSet",
     "BaseActor",
+    # Builders
+    "BuilderAgent",
+    "StructuredAgent",
+    "CompletionAgent",
+    "ToolExecutorAgent",
+    "DirectToolAgent",
     # Execution
     "ExecutionState",
     "ExecutionEvent",
@@ -84,8 +100,12 @@ __all__ = [
     "AuthorType",
     "ArtifactRef",
     # Parallel
-    "ErrorStrategy",
+    "ParallelErrorStrategy",
     "ParallelEventGroup",
+    # Builder types
+    "BuilderErrorStrategy",
+    "AggregationStrategy",
+    "ToolExecutionResult",
     # Decorators
     "tool_decorator",
     "agent_decorator",
@@ -95,7 +115,4 @@ __all__ = [
     "validate_handler_signature",
     "ActorValidationError",
     "StateValidationError",
-    # Builders
-    "AgentBuilder",
-    "ToolBuilder",
 ]

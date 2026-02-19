@@ -33,6 +33,22 @@ class InterruptReason(str, Enum):
     CUSTOM = "custom"
 
 
+class ErrorStrategy(str, Enum):
+    """Error handling strategy for builder-generated agents."""
+    RAISE = "raise"                  # Raise exception immediately (default)
+    RETURN_NONE = "return_none"      # Return ExecutionResult with ok=False
+    LOG_AND_CONTINUE = "log"         # Log error and return partial results
+    SILENT = "silent"                # Suppress errors, return None
+
+
+class AggregationStrategy(str, Enum):
+    """Strategy for aggregating multiple tool execution results."""
+    DICT = "dict"                    # Dictionary keyed by tool name (default)
+    LIST = "list"                    # List of results in execution order
+    CONCATENATE = "concatenate"      # Concatenate string results with separator
+    FIRST = "first"                  # Return only the first successful result
+
+
 class InterruptSignal(BaseModel):
     """Signal model for execution interruption."""
     reason: InterruptReason = Field(description="Why execution was interrupted")

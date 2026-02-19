@@ -302,6 +302,139 @@ agent = (
 
 ---
 
+#### Advanced Builder Configuration (Phase 3 & 4)
+
+**LLM Configuration with Parameter Validation:**
+
+The builder pattern now supports chainable LLM configuration methods with built-in validation:
+
+```python
+from rh_agents import BuilderAgent, OpenAILLM
+
+agent = (
+    BuilderAgent()
+    .name("SmartAgent")
+    .description("Configurable agent with LLM parameters")
+    .with_llm(OpenAILLM())
+    .with_temperature(0.7)      # Range: 0.0-2.0 (validated)
+    .with_max_tokens(2000)       # Range: 1-128000 (validated)
+    .with_retry(
+        max_attempts=3,          # Range: 1-10 (validated)
+        initial_delay=1.0,       # Must be > 0 (validated)
+        exponential_base=2.0
+    )
+    .as_cacheable(ttl=3600)      # TTL: ≥ 0 seconds (validated)
+    .build()
+)
+```
+
+**Parameter Validation:**
+- `temperature`: 0.0-2.0 (ValueError if outside range)
+- `max_tokens`: 1-128000 (ValueError if outside range)
+- `max_attempts`: 1-10 (ValueError if outside range)
+- `initial_delay`: Must be > 0 (ValueError if ≤ 0)
+- `ttl`: Must be ≥ 0 (ValueError if negative)
+
+**Result Aggregation Strategies:**
+
+When working with ExecutionState step results, configure how results are merged:
+
+```python
+from rh_agents.core.aggregation import AggregationStrategy
+
+# Concatenate text results
+agent = (
+    BuilderAgent()
+    .name("SummaryAgent")
+    .with_aggregation(
+        strategy=AggregationStrategy.CONCATENATE,
+        separator="\n\n"  # Custom separator
+    )
+    .build()
+)
+
+# Merge dictionary results
+agent = (
+    BuilderAgent()
+    .name("DataAgent")
+    .with_aggregation(
+        strategy=AggregationStrategy.MERGE,
+        allow_overwrite=False  # Raise error on key conflicts
+    )
+    .build()
+)
+
+# Combine list results
+agent = (
+    BuilderAgent()
+    .name("ListAgent")
+    .with_aggregation(strategy=AggregationStrategy.COMBINE)
+    .build()
+)
+
+# Custom aggregation logic
+def custom_aggregator(results: list) -> Any:
+    # Your custom logic here
+    return processed_results
+
+agent = (
+    BuilderAgent()
+    .name("CustomAgent")
+    .with_aggregation(
+        strategy=AggregationStrategy.CUSTOM,
+        custom_aggregator=custom_aggregator
+    )
+    .build()
+)
+```
+
+**Available Strategies:**
+- `CONCATENATE` - Join text results with separator (default: space)
+- `MERGE` - Deep merge dictionary results with conflict handling
+- `COMBINE` - Flatten and combine list results
+- `CUSTOM` - Use your own aggregation function
+
+**Complete Production Example:**
+
+```python
+from rh_agents import BuilderAgent, OpenAILLM
+from rh_agents.core.aggregation import AggregationStrategy
+
+production_agent = (
+    BuilderAgent()
+    .name("ProductionAgent")
+    .description("Production-ready agent with full configuration")
+    .with_llm(OpenAILLM(model="gpt-4"))
+    .with_temperature(0.3)           # Conservative for production
+    .with_max_tokens(4000)            # Reasonable limit
+    .with_retry(
+        max_attempts=5,               # Robust retry policy
+        initial_delay=2.0,
+        exponential_base=2.0
+    )
+    .as_cacheable(ttl=3600)          # 1 hour cache
+    .with_aggregation(
+        strategy=AggregationStrategy.CONCATENATE,
+        separator="\n---\n"
+    )
+    .with_tools([tool1, tool2])
+    .add_precondition(lambda state: state.storage is not None)
+    .add_postcondition(lambda result: len(result.content) > 0)
+    .build()
+)
+```
+
+**📚 Comprehensive Guides:**
+
+For detailed documentation and examples:
+- **[Builder Pattern Guide](docs/BUILDERS_GUIDE.md)** - Complete builder API reference
+- **[Configuration Guide](docs/CONFIGURATION_GUIDE.md)** - All configuration options explained
+- **[examples/builder_basic.py](examples/builder_basic.py)** - Simple getting-started examples
+- **[examples/builder_advanced.py](examples/builder_advanced.py)** - Advanced patterns (6 comprehensive examples)
+- **[examples/builder_comparison.py](examples/builder_comparison.py)** - Before/after comparisons (80-92% code reduction)
+
+---
+
 ### Class-Based Approach
 
 Traditional approach with full control and type safety:
@@ -968,6 +1101,74 @@ validate_actor(agent)
 result = await ExecutionEvent(actor=agent)(input_msg, "", state)
 ```
 
+### Example 8: Comprehensive Builder Examples
+
+For comprehensive builder pattern examples with detailed explanations, see:
+
+**📘 [examples/builder_basic.py](examples/builder_basic.py)** - Getting Started
+- Simple agent creation with minimal configuration
+- Tool creation and integration
+- Basic LLM configuration
+- Quick start patterns
+
+**📗 [examples/builder_advanced.py](examples/builder_advanced.py)** - Advanced Patterns (6 Examples)
+1. **Dynamic Prompt Building** - Access ExecutionState for context-aware prompts
+2. **Advanced Error Handling** - Retry with exponential backoff and error recovery
+3. **Result Aggregation** - All 4 strategies (concatenate, merge, combine, custom)
+4. **Caching & Artifacts** - Session cache, static cache, indefinite cache, artifact storage
+5. **Complex Workflows** - Multi-agent 3-stage pipeline with coordination
+6. **Production Configuration** - Complete production-ready setup with monitoring
+
+**📕 [examples/builder_comparison.py](examples/builder_comparison.py)** - Code Reduction Analysis
+- Before/after comparisons showing 80-92% boilerplate reduction
+- Traditional vs Builder pattern side-by-side
+- Quantitative metrics: 40-120 lines → 5-15 lines per agent
+- Migration guide with 5 steps
+
+**Key Highlights from Advanced Examples:**
+
+```python
+# Example: Dynamic prompts with ExecutionState
+agent = (
+    BuilderAgent()
+    .name("ContextAwareAgent")
+    .with_prompt_builder(lambda state: f"Context: {state.get_context()}")
+    .build()
+)
+
+# Example: Production configuration
+agent = (
+    BuilderAgent()
+    .name("ProductionAgent")
+    .with_llm(OpenAILLM())
+    .with_temperature(0.3)
+    .with_max_tokens(4000)
+    .with_retry(max_attempts=5, initial_delay=2.0)
+    .as_cacheable(ttl=3600)
+    .with_aggregation(strategy=AggregationStrategy.CONCATENATE)
+    .build()
+)
+
+# Example: Custom aggregation
+def smart_merge(results):
+    """Merge with conflict resolution"""
+    return {k: v for r in results for k, v in r.items()}
+
+agent = (
+    BuilderAgent()
+    .with_aggregation(
+        strategy=AggregationStrategy.CUSTOM,
+        custom_aggregator=smart_merge
+    )
+    .build()
+)
+```
+
+**Code Reduction Metrics:**
+- Structured Output: 42 lines → 5 lines (88% reduction)
+- Tool Execution: 65 lines → 5 lines (92% reduction)
+- Full-Featured Agent: 100+ lines → 11 lines (88% reduction)
+
 ---
 
 ## 📖 API Reference
@@ -1247,9 +1448,26 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 🔗 Links
 
+### Project Resources
 - **GitHub**: [rhodief/rh-agents](https://github.com/rhodief/rh-agents)
 - **Documentation**: Coming soon
-- **Examples**: See `/examples` directory
+- **Examples Directory**: `/examples`
+
+### Builder Pattern Documentation
+- **[Builder Pattern Guide](docs/BUILDERS_GUIDE.md)** - Complete API reference and patterns
+- **[Configuration Guide](docs/CONFIGURATION_GUIDE.md)** - LLM parameters, retry, caching, aggregation
+
+### Example Files
+- **[builder_basic.py](examples/builder_basic.py)** - Getting started examples
+- **[builder_advanced.py](examples/builder_advanced.py)** - 6 advanced patterns with detailed explanations
+- **[builder_comparison.py](examples/builder_comparison.py)** - Before/after comparisons showing code reduction
+
+### Additional Examples
+- **[index.py](examples/index.py)** - Multi-agent workflow with OmniAgent
+- **[cached_index.py](examples/cached_index.py)** - Caching patterns
+- **[interrupt_basic.py](examples/interrupt_basic.py)** - State recovery and interrupts
+- **[parallel_basic.py](examples/parallel_basic.py)** - Parallel execution patterns
+- **[streaming_api.py](examples/streaming_api.py)** - Real-time event streaming
 
 ---
 

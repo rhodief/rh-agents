@@ -9,6 +9,13 @@ from rh_agents.core.result_types import LLM_Result, LLM_Tool_Call
 from rh_agents.models import Message, AuthorType
 
 
+class ToolCall(BaseModel):
+    """Model representing a tool call with OpenAI's tool call ID"""
+    id: str
+    tool_name: str
+    arguments: str
+
+
 class OpenAIFunction(BaseModel):
     """Pydantic model for OpenAI function definition"""
     name: str
